@@ -19,21 +19,29 @@ from datetime import datetime, date
 import engine       # Parallel scraping engine
 import summarize    # Report generator
 from common import ensure_dir
-from db import upsert_banner, save_run, update_daily_summary
+from db import upsert_banner, save_run, update_daily_summary, check_connection
 
 # Logging тохиргоо
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler() # Terminal руу хэвлэх
-    ]
-)
-logger = logging.getLogger("ScraperPipeline")
+
+
+
 
 # Замууд (Absolute paths)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCREENSHOT_DIR = os.path.join(BASE_DIR, "banner_screenshots")
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+
+ensure_dir(LOG_DIR)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(), # Terminal руу
+        logging.FileHandler(os.path.join(LOG_DIR, "scraper.log"), encoding='utf-8') # Файл руу
+    ]
+)
+logger = logging.getLogger("ScraperPipeline")
 
 def run_pipeline() -> dict:
     """
@@ -44,7 +52,11 @@ def run_pipeline() -> dict:
     ensure_dir(SCREENSHOT_DIR)
     
     logger.info("▶ PIPELINE STARTED: Starting full scrape job...")
-    
+
+    if not check_connection():
+        msg = "❌ Database connection failed! Aborting pipeline."
+        logger.error(msg)
+        return {"status": "failed", "error": "no_db_connection"}
     # Статистик цуглуулах хувьсагч
     stats = {
         "total_collected": 0,

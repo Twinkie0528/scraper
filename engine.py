@@ -65,7 +65,7 @@ def scrape_all_sites() -> Dict[str, List]:
     all_results = {}
     
     # CPU Core болон RAM-аас хамаарч worker-ийн тоог тохируулна (Server дээр 4 тохиромжтой)
-    MAX_WORKERS = 4 
+    MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
     
     print(f"🚀 Launching parallel scraper with {MAX_WORKERS} workers...")
     

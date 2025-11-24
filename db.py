@@ -114,6 +114,7 @@ def update_daily_summary(date_key: str, total_collected: int, new_banners: int, 
         )
     except Exception as e:
         print(f"Failed to update daily stats: {e}")
+        
 
 def get_stats() -> dict:
     """
@@ -141,3 +142,12 @@ def get_stats() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+    
+def check_connection() -> bool:
+    """DB холболт хэвийн эсэхийг шалгана"""
+    return banners_col is not None
+
+
+    
+    
+    

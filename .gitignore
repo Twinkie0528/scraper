@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+_export/
+.git/
+.idea/
+.vscode/
+logs/
+*.log
+banner_screenshots/
+.env
+.venv/

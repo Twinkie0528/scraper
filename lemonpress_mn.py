@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# lemonpress_mn.py — Сайжруулсан scraper for https://lemonpress.mn (Fix v4)
+# lemonpress_mn.py — Сайжруулсан scraper for https://lemonpress.mn (Fix v5 - Final)
 import os
 import time
 import hashlib
@@ -11,6 +11,7 @@ from common import ensure_dir, http_get_bytes, classify_ad
 
 HOME = "https://lemonpress.mn"
 CAT_URL = "https://lemonpress.mn/category/surtalchilgaa"
+
 # Lemonpress дээр түгээмэл байдаг зар сурталчилгааны домэйнууд
 AD_IFRAME_HINTS = ("googlesyndication.com", "doubleclick.net", "adnxs.com", "boost.mn", "facebook.com/plugins")
 
@@ -26,96 +27,120 @@ def _shot(output_dir: str, src: str, i: int) -> str:
 def _scroll_full_page(page):
     """Хуудсыг бүхэлд нь доош гүйлгэж Lazy Load зургуудыг дуудна"""
     prev_height = -1
-    max_scrolls = 20
+    max_scrolls = 30  # Scroll-ийн тоог нэмсэн
+    
+    logging.info("Scrolling page to load lazy images...")
     for _ in range(max_scrolls):
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        page.wait_for_timeout(800)
+        page.wait_for_timeout(1000) # 1 секунд хүлээх
         new_height = page.evaluate("document.body.scrollHeight")
         if new_height == prev_height:
             break
         prev_height = new_height
-    # Буцаад дээшээ гарах (Screenshot авахад зарим элемент дээшээ байж магадгүй)
+    
+    # Буцаад дээшээ гарах
     page.evaluate("window.scrollTo(0, 0)")
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(1000)
 
 def _collect_lemonpress(page, output_dir: str, seen: Set[str], ads_only: bool, min_score: int) -> List[Dict]:
     out: List[Dict] = []
     site_host = _host(HOME)
     
-    # 1. IFRAME (Google Ads, Third party)
-    for el in page.locator("iframe").all():
+    # ---------------------------------------------------------
+    # 1. IFRAME (Google Ads, Third party, Boost)
+    # ---------------------------------------------------------
+    iframes = page.locator("iframe").all()
+    logging.info(f"Found {len(iframes)} iframes to check.")
+    
+    for el in iframes:
         try:
             src = (el.get_attribute("src") or "").strip()
-            # Iframe src байхгүй эсвэл аль хэдийн харсан бол алгасах
             if not src or src in seen: continue
             
-            # Hint check: Хэрэв ads_only=True бол заавал hint дотор байх ёстой
+            # Hint check: ads_only=True үед зөвхөн hint доторхыг авна
             if ads_only and not any(hint in src for hint in AD_IFRAME_HINTS):
                 continue
 
             bbox = el.bounding_box()
-            if not bbox or bbox['width'] < 50 or bbox['height'] < 50: continue # Хэт жижиг iframe хэрэггүй
+            # Хэт жижиг iframe-ийг алгасах (пиксел, tracking pixel г.м)
+            if not bbox or bbox['width'] < 50 or bbox['height'] < 50: continue
             
             w, h = int(bbox['width']), int(bbox['height'])
             
-            # Screenshot & Save
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
+            
             # Iframe харагдахгүй байвал screenshot алдаа өгч магадгүй тул try-catch
-            try: el.screenshot(path=shot_path)
-            except: continue
+            try: 
+                el.scroll_into_view_if_needed(timeout=2000)
+                el.screenshot(path=shot_path)
+            except: 
+                pass # Screenshot авч чадаагүй ч өгөгдлийг хадгална
 
             out.append({
                 "site": site_host, 
                 "src": src, 
                 "landing_url": src, 
-                "img_bytes": b"", 
+                "img_bytes": b"", # Iframe-ийн зургийг татах боломжгүй
                 "width": w, 
                 "height": h, 
                 "screenshot_path": shot_path, 
-                "notes": "iframe_ad"
+                "notes": "iframe_ad",
+                "ad_score": 10, # Iframe бол шууд өндөр оноо өгнө
+                "ad_reason": "iframe_detected"
             })
         except Exception: continue
 
-    # 2. DIRECT IMAGES (Banner ads inside <a> tags)
-    # Lemonpress-ийн бүтцэд тааруулж хайх хүрээг өргөтгөв
-    for el in page.locator("a img").all():
+    # ---------------------------------------------------------
+    # 2. DIRECT IMAGES (Banner ads inside <a> tags & Standalone imgs)
+    # ---------------------------------------------------------
+    # Lemonpress-ийн нийтлэл дундах болон хажуугийн зургуудыг хайх
+    # Selector-ийг өргөтгөсөн: a img, div.banner img, figure img
+    images = page.locator("a img, div[class*='banner'] img, figure img, .post-content img").all()
+    logging.info(f"Found {len(images)} images to check.")
+
+    for el in images:
         try:
-            parent = el.locator("..") # Get parent <a> tag
-            
             # Шүүлтүүр: Хэмжээ
             bbox = el.bounding_box()
             if not bbox: continue
             w, h = int(bbox['width']), int(bbox['height'])
             
-            # Lemonpress лого болон жижиг icon-уудыг хасах
+            # Lemonpress лого болон жижиг icon-уудыг хасах (200x100-аас бага бол)
             if w < 200 or h < 100: continue 
 
             src = (el.get_attribute("src") or "").strip()
             # Data URL болон SVG алгасах
             if not src or src.startswith("data:") or src.lower().endswith(".svg"): continue
+            
+            # Absolute URL болгох
+            src = urllib.parse.urljoin(HOME, src)
             if src in seen: continue
 
-            landing = (parent.get_attribute("href") or "").strip()
+            # Landing URL олох (Parent <a> tag)
+            landing = ""
+            parent = el.locator("xpath=ancestor::a").first
+            if parent.count() > 0:
+                landing = (parent.get_attribute("href") or "").strip()
+                landing = urllib.parse.urljoin(HOME, landing)
             
-            # --- ЧУХАЛ ЗАСВАР: Дотоод линкийг ЗӨВШӨӨРӨХ ---
-            # Lemonpress дээр "Partner" нийтлэлүүд дотоод линк байдаг тул
-            # _host(landing) != site_host гэсэн хатуу нөхцөлийг авч хаялаа.
-            # Түүний оронд classify_ad функц рүү найдаж, эсвэл хэмжээгээр нь шүүнэ.
-            
-            # Classify Ad
+            # Classify Ad (Зар мөн эсэхийг шалгах)
+            # "onpage" гэдэг нь энгийн зураг гэсэн үг
             is_ad, score, reason = classify_ad(site_host, src, landing, str(w), str(h), "onpage", min_score)
             
-            # Хэрэв ads_only=True мөртлөө оноо бага бол алгасах
-            # Гэхдээ Lemonpress-ийн хувьд том зурагтай линкүүд нь ихэвчлэн PR байдаг тул
-            # Хэмжээ нь том бол (Жишээ нь wide banner) авах магадлалыг нэмэгдүүлнэ.
+            # Хэрэв ads_only=True бол шүүлтүүр ажиллана
             if ads_only:
-                if is_ad != "1" and not (w > 600 and h > 200): # Wide banner бол ad биш байсан ч авна
+                # Том хэмжээтэй (Wide banner) бол зар биш байсан ч авч үзэх (Partner content байх магадлалтай)
+                is_wide_banner = (w > 600 and 100 < h < 400)
+                if is_ad != "1" and not is_wide_banner:
                     continue
 
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
-            try: el.screenshot(path=shot_path)
+            
+            try: 
+                el.scroll_into_view_if_needed(timeout=2000)
+                el.screenshot(path=shot_path)
             except: pass
             
             img_bytes = http_get_bytes(src, referer=page.url)
@@ -142,29 +167,48 @@ def scrape_lemonpress(output_dir: str, dwell_seconds: int = 0, headless: bool = 
     out: List[Dict] = []
     
     with sync_playwright() as p:
+        # Browser Launch options
         br = p.chromium.launch(headless=headless)
+        
+        # Context options (User agent & Viewport)
+        context = br.new_context(
+            viewport={"width": 1600, "height": 1200},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        
         try:
-            pg = br.new_page(viewport={"width": 1600, "height": 1200})
-            
+            pg = context.new_page()
+            pg.set_default_timeout(60000) # 60 sec default timeout
+
             logging.info("Scraping Lemonpress Homepage...")
-            pg.goto(HOME, timeout=60000, wait_until="commit") # commit болмогц эхэлнэ
             
-            # --- ЗАСВАР: Сүлжээ болон Scroll-ийг сайтар хүлээх ---
-            pg.wait_for_load_state("networkidle", timeout=10000) # Сүлжээ тогтворжихыг хүлээнэ
+            try:
+                pg.goto(HOME, wait_until="domcontentloaded") # commit оронд domcontentloaded ашиглав (илүү хурдан)
+            except Exception as e:
+                logging.warning(f"Homepage load warning: {e}")
+
+            # --- ЗАСВАР: Network Idle-ийг алгасаж болох try-except ---
+            try:
+                pg.wait_for_load_state("networkidle", timeout=15000) # 15 sec хүлээгээд болохгүй бол цааш явна
+            except Exception:
+                logging.warning("⚠️ Network idle timeout exceeded, proceeding anyway...")
+
             _scroll_full_page(pg)
             
             out.extend(_collect_lemonpress(pg, output_dir, seen, ads_only, min_score))
             
-            # Category page scrape (Optional - хэрэв шаардлагатай бол)
+            # Category page scrape (Optional)
             if max_pages > 0:
                 current_url = CAT_URL
                 for i in range(max_pages):
                     logging.info(f"-> Scraping category page {i+1}: {current_url}")
                     try:
-                        pg.goto(current_url, timeout=60000, wait_until="domcontentloaded")
-                        pg.wait_for_load_state("networkidle", timeout=5000)
-                        _scroll_full_page(pg)
+                        pg.goto(current_url, wait_until="domcontentloaded")
+                        try:
+                            pg.wait_for_load_state("networkidle", timeout=10000)
+                        except: pass
                         
+                        _scroll_full_page(pg)
                         out.extend(_collect_lemonpress(pg, output_dir, seen, ads_only, min_score))
                         
                         # Pagination Check
@@ -185,7 +229,7 @@ def scrape_lemonpress(output_dir: str, dwell_seconds: int = 0, headless: bool = 
         finally:
             br.close()
             
-    # Remove duplicates
+    # Remove duplicates by src
     unique_out = []
     seen_srcs = set()
     for item in out:
