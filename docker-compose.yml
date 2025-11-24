@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # 1. Database Service
+  mongo:
+    image: mongo:6.0
+    container_name: banner_mongo
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+
+  # 2. Scraper Application Service
+  app:
+    build: .
+    container_name: banner_scraper_app
+    restart: always
+    ports:
+      - "8899:8899"
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/banner_db
+      - TZ=Asia/Ulaanbaatar
+    volumes:
+      # Output хавтаснуудыг гаднаас харахын тулд холбоно
+      - ./_export:/app/_export
+      - ./banner_screenshots:/app/banner_screenshots
+
+volumes:
+  mongo_data:
