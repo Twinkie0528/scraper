@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import pymongo
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # .env файлаас тохиргоо унших
@@ -146,6 +146,25 @@ def get_stats() -> dict:
 def check_connection() -> bool:
     """DB холболт хэвийн эсэхийг шалгана"""
     return banners_col is not None
+    
+def archive_old_banners(days_threshold: int = 7) -> int:
+    """
+    Сүүлийн 'days_threshold' хоногт харагдаагүй заруудыг 'is_archived=True' болгоно.
+    """
+    if banners_col is None: return 0
+
+    cutoff_date = (datetime.now() - timedelta(days=days_threshold)).strftime("%Y-%m-%d")
+
+    try:
+        # Delete биш Update хийнэ
+        result = banners_col.update_many(
+            {"last_seen_date": {"$lt": cutoff_date}, "is_archived": {"$ne": True}},
+            {"$set": {"is_archived": True, "status": "ARCHIVED"}}
+        )
+        return result.modified_count
+    except Exception as e:
+        print(f"Archive Error: {e}")
+        return 0
 
 
     

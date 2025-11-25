@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import run
-from db import banners_col
+from db import banners_col, archive_old_banners
 
 # Setup
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -120,7 +120,7 @@ def job_runner(source="Auto"):
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     try:
         scheduler = BackgroundScheduler()
-        scheduler.add_job(job_runner, CronTrigger(hour=9, minute=0, timezone='Asia/Ulaanbaatar'), id='daily')
+        scheduler.add_job(job_runner, CronTrigger(hour='9,21', minute=0, timezone='Asia/Ulaanbaatar'), id='daily')
         scheduler.start()
         print("✅ Scheduler started.")
     except: pass
@@ -132,7 +132,7 @@ def index():
     # 1. Data Fetch
     rows = []
     if banners_col is not None:
-        rows = list(banners_col.find({}, {"_id": 0}).sort("last_seen_date", -1))
+        rows = list(banners_col.find({"is_archived": {"$ne": True}}, {"_id": 0}).sort("last_seen_date", -1))
     
     # 2. DATA PREPARATION
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -211,6 +211,12 @@ def status():
 @app.route("/_debug/last-log")
 def last_log():
     return "\n".join(LOG_BUFFER)
+
+@app.route("/scraper/cleanup", methods=["POST"])
+def cleanup_old_ads():
+    # 7 хоногоос дээш хугацаанд харагдаагүйг архивлах
+    count = archive_old_banners(7)
+    return jsonify({"status": "success", "archived": count})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8899, debug=True)

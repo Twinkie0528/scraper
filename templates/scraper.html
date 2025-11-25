@@ -98,6 +98,7 @@ padding:12px; max-height:280px; overflow:auto; white-space:pre-wrap; box-shadow:
 <div class="actions">
 {% if tsv_exists %}<a class="btn" href="{{ url_for('download_tsv') }}" title="TSV татах">⬇️ TSV</a>{% endif %}
 {% if xlsx_exists %}<a class="btn" href="{{ url_for('download_xlsx') }}" title="XLSX татах">⬇️ XLSX</a>{% endif %}
+<button id="btnCleanup" class="btn" type="button" title="7+ хоног харагдаагүй зарыг нуух">🧹 Hide Old (7d+)</button>
 <button id="btnScrape" class="btn btn-primary" type="button">⚡ Scrape Now</button>
 <button id="btnRefresh" class="btn" type="button" title="Тайланг шинэчлэх">↻ Refresh</button>
 </div>
@@ -200,6 +201,7 @@ padding:12px; max-height:280px; overflow:auto; white-space:pre-wrap; box-shadow:
 (function(){
 const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
 const btn = $("#btnScrape");
+const btnCleanup = $("#btnCleanup");
 const btnRefresh = $("#btnRefresh");
 const banner = $("#banner"), btxt=$("#btxt"), bsub=$("#bsub"), bdot=$("#bdot");
 const chipsWrap = $("#chips");
@@ -376,6 +378,33 @@ btn.disabled = true;
 }
 }catch(e){}
 });
+
+// Cleanup Logic (Энийг скриптийн төгсгөл хавьд нэмнэ)
+if(btnCleanup){
+    btnCleanup.addEventListener('click', async () => {
+        if(!confirm("Сүүлийн 7 хоног харагдаагүй 'дууссан' заруудыг жагсаалтаас нуух уу?\n(Excel тайланд үлдэнэ)")) return;
+        
+        try {
+            btnCleanup.disabled = true;
+            setBanner('info', 'Цэвэрлэгээ хийж байна...', '', true);
+            
+            const res = await fetch('/scraper/cleanup', { method: 'POST' });
+            const data = await res.json();
+            
+            if(data.status === 'success'){
+                setBanner('ok', `Амжилттай! Нийт ${data.archived} хуучин зар жагсаалтаас нуугдлаа.`);
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                setBanner('err', 'Алдаа гарлаа.');
+            }
+        } catch(e) {
+            console.error(e);
+            setBanner('err', 'Сүлжээний алдаа.');
+        } finally {
+            btnCleanup.disabled = false;
+        }
+    });
+}
 
 btn?.addEventListener('click', ()=>{ if(!btn.disabled) postScrape(); });
 btnRefresh?.addEventListener('click', ()=>location.reload());
