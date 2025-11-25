@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# caak_mn.py — Relaxed filter for Caak (Cleaned & Improved)
+# caak_mn.py — Relaxed filter for Caak (Fixed Score Logic)
 import os
 import time
 import hashlib
@@ -31,7 +31,7 @@ def _shot(output_dir: str, src: str, i: int) -> str:
 def _prime_page(page) -> None:
     # Lazy load зургуудыг хүчээр дуудах
     page.evaluate("document.querySelectorAll('img[loading=\"lazy\"]').forEach(img => img.loading = 'eager')")
-    # Доош гүйлгэх (Илүү гүнзгийрүүлсэн)
+    # Доош гүйлгэх
     for _ in range(5): 
         page.mouse.wheel(0, 2000)
         page.wait_for_timeout(1000)
@@ -40,7 +40,7 @@ def _collect_caak(page, output_dir: str, seen: Set[str], ads_only: bool, min_sco
     out: List[Dict] = []
     site_host = _host(HOME)
 
-    # 1) IFRAME (Зөөлөн шүүлтүүртэй)
+    # 1) IFRAME
     for el in page.locator("iframe").all():
         try:
             src = (el.get_attribute("src") or "").strip()
@@ -52,16 +52,13 @@ def _collect_caak(page, output_dir: str, seen: Set[str], ads_only: bool, min_sco
 
             landing = src
             notes = "iframe"
-            
-            # Ad score тооцох
             is_ad, score, reason = classify_ad(site_host, src, landing, str(w), str(h), notes, min_score=min_score)
             
             if ads_only:
-                # Known Ad domain эсвэл Banner-like хэмжээтэй бол авна
                 is_known_ad = any(hint in src for hint in AD_IFRAME_HINTS)
+                # Iframe бол арай зөөлөн хандана, гэхдээ хэмжээг харна
                 is_banner_size = (w > 200 and h > 80)
-                if not (is_known_ad or is_banner_size):
-                    continue
+                if not (is_known_ad or is_banner_size): continue
 
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
@@ -76,7 +73,7 @@ def _collect_caak(page, output_dir: str, seen: Set[str], ads_only: bool, min_sco
             })
         except: continue
 
-    # 2) IMAGES (Internal link зөвшөөрсөн)
+    # 2) IMAGES
     for el in page.locator("img, a img, figure img").all():
         try:
             bbox = el.bounding_box()
@@ -90,16 +87,19 @@ def _collect_caak(page, output_dir: str, seen: Set[str], ads_only: bool, min_sco
             parent = el.locator("xpath=ancestor::a").first
             if parent.count(): landing = parent.get_attribute("href") or ""
 
-            # ШИНЭ ЛОГИК: Дотоод/Гадаад хамаагүй, хэмжээ болон URL бүтцээр нь шүүнэ
             notes = "onpage"
             if ACTIVE_STORAGE_HINT in src: notes = "onpage_active_storage"
             
+            # Ad Score тооцох
             is_ad, score, reason = classify_ad(site_host, src, landing, str(w), str(h), notes, min_score=min_score)
 
             if ads_only:
-                # 1. classify_ad нь Зар гэж үзсэн бол авна
-                # 2. ЭСВЭЛ Том хэмжээтэй (Wide banner) бол авна (Caak дээрх Голомтын баннер шиг)
-                is_wide_banner = (w > 500 and h > 80)
+                # --- ЗАСВАР ОРСОН ХЭСЭГ ---
+                # 1. Хэрэв оноо >= min_score (3) бол шууд авна.
+                # 2. Хэрэв оноо хүрэхгүй бол "Wide Banner" эсэхийг шалгана.
+                # ГЭХДЭЭ: Нийтлэлийн зураг (өндөр томтой) орохгүйн тулд HEIGHT < 350 нөхцөл нэмэв.
+                
+                is_wide_banner = (w > 600 and 90 < h < 350)
                 
                 if is_ad != "1" and not is_wide_banner:
                     continue
@@ -134,7 +134,6 @@ def scrape_caak(output_dir: str, dwell_seconds: int = 45, headless: bool = True,
             context.set_default_navigation_timeout(90000)
             pg = context.new_page()
 
-            # Retry logic (Сүлжээний алдаанаас сэргийлэх)
             for attempt in range(2):
                 try:
                     pg.goto(HOME, wait_until="domcontentloaded")
