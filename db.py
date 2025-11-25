@@ -146,7 +146,25 @@ def get_stats() -> dict:
 def check_connection() -> bool:
     """DB холболт хэвийн эсэхийг шалгана"""
     return banners_col is not None
-    
+
+# db.py файлын хамгийн төгсгөлд:
+
+def archive_single_banner(site: str, src: str) -> bool:
+    """
+    Тодорхой нэг зарыг (site + src хослолоор) олж
+    Dashboard-оос нуух (is_archived=True).
+    """
+    if banners_col is None: return False
+    try:
+        res = banners_col.update_one(
+            {"site": site, "src": src},
+            {"$set": {"is_archived": True, "status": "MANUAL_HIDDEN"}}
+        )
+        return res.modified_count > 0
+    except Exception as e:
+        print(f"Archive Single Error: {e}")
+        return False
+
 def archive_old_banners(days_threshold: int = 7) -> int:
     """
     Сүүлийн 'days_threshold' хоногт харагдаагүй заруудыг 'is_archived=True' болгоно.

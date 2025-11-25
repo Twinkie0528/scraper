@@ -29,6 +29,13 @@ color:var(--txt); background:linear-gradient(180deg,#f8fafc 0,#eef2f7 100%);
 display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;
 margin-bottom:18px;
 }
+.btn-icon {
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer; padding: 6px 10px;
+    color: var(--err); transition: all 0.2s;
+}
+.btn-icon:hover { background: var(--errbg); border-color: var(--err); }
+th.c-action, td.c-action { width: 50px; text-align: center; }   
 h1{margin:0; font-size:28px; letter-spacing:.2px}
 .actions{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
 .btn{
@@ -154,9 +161,19 @@ padding:12px; max-height:280px; overflow:auto; white-space:pre-wrap; box-shadow:
 <th>Оноо</th>
 <th>Screenshot</th>
 <th>Landing URL</th>
-<th>Шалтгаан</th>
+<th>Шалтгаан</th><th>Шалтгаан</th>
+<th class="c-action">Үйлдэл</th>
 </tr>
 </thead>
+<td class="c-reason">{{ row.get('ad_reason','') }}</td>
+<td class="c-action">
+    <button class="btn-icon btn-del-row" title="Жагсаалтаас нуух" 
+            data-site="{{ row.get('site') }}" 
+            data-src="{{ row.get('src') }}">
+        🗑️
+    </button>
+</td>
+</tr>
 <tbody>
 {% for row in g.list %}
 <tr class="row">
@@ -409,6 +426,42 @@ if(btnCleanup){
 btn?.addEventListener('click', ()=>{ if(!btn.disabled) postScrape(); });
 btnRefresh?.addEventListener('click', ()=>location.reload());
 })();
+
+// Row Delete Logic (Шинээр нэмэх)
+document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.btn-del-row');
+    if (!btn) return;
+
+    const site = btn.dataset.site;
+    const src = btn.dataset.src;
+    const row = btn.closest('tr');
+
+    if (!confirm("Энэ зарыг жагсаалтаас нуух уу?\n(Excel тайланд үлдэнэ)")) return;
+
+    try {
+        btn.disabled = true;
+        btn.style.opacity = 0.5;
+
+        const res = await fetch('/scraper/archive-one', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ site, src })
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            row.style.backgroundColor = '#fee2e2';
+            setTimeout(() => row.remove(), 500);
+        } else {
+            alert("Алдаа гарлаа. Дахин оролдоно уу.");
+            btn.disabled = false;
+            btn.style.opacity = 1;
+        }
+    } catch (err) {
+        console.error(err);
+        alert("Сүлжээний алдаа.");
+    }
+});
 </script>
 </body>
 </html>

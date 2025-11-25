@@ -3,12 +3,14 @@ import os
 import threading
 import logging
 import datetime
-from flask import Flask, jsonify, render_template, send_from_directory, url_for
+from flask import Flask, jsonify, render_template, send_from_directory, url_for, request
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from db import banners_col, archive_old_banners, archive_single_banner # <--- archive_single_banner нэмэх
+
 
 import run
-from db import banners_col, archive_old_banners
+
 
 # Setup
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -217,6 +219,18 @@ def cleanup_old_ads():
     # 7 хоногоос дээш хугацаанд харагдаагүйг архивлах
     count = archive_old_banners(7)
     return jsonify({"status": "success", "archived": count})
+
+@app.route("/scraper/archive-one", methods=["POST"])
+def archive_one_ad():
+    data = request.json
+    site = data.get("site")
+    src = data.get("src")
+    
+    if not site or not src:
+        return jsonify({"status": "error", "msg": "Missing data"}), 400
+        
+    success = archive_single_banner(site, src)
+    return jsonify({"status": "success" if success else "failed"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8899, debug=True)
