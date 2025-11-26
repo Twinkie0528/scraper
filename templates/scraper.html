@@ -161,19 +161,10 @@ padding:12px; max-height:280px; overflow:auto; white-space:pre-wrap; box-shadow:
 <th>Оноо</th>
 <th>Screenshot</th>
 <th>Landing URL</th>
-<th>Шалтгаан</th><th>Шалтгаан</th>
+<th>Шалтгаан</th>
 <th class="c-action">Үйлдэл</th>
 </tr>
 </thead>
-<td class="c-reason">{{ row.get('ad_reason','') }}</td>
-<td class="c-action">
-    <button class="btn-icon btn-del-row" title="Жагсаалтаас нуух" 
-            data-site="{{ row.get('site') }}" 
-            data-src="{{ row.get('src') }}">
-        🗑️
-    </button>
-</td>
-</tr>
 <tbody>
 {% for row in g.list %}
 <tr class="row">
@@ -199,6 +190,13 @@ padding:12px; max-height:280px; overflow:auto; white-space:pre-wrap; box-shadow:
 {% if land and land != '#' %}<a href="{{ land }}" target="_blank" rel="noopener">Линк</a>{% else %}-{% endif %}
 </td>
 <td class="c-reason">{{ row.get('ad_reason','') }}</td>
+<td class="c-action">
+    <button class="btn-icon btn-del-row" title="Жагсаалтаас нуух" 
+            data-site="{{ row.get('site') }}" 
+            data-src="{{ row.get('src') }}">
+        🗑️
+    </button>
+</td>
 </tr>
 {% endfor %}
 </tbody>
