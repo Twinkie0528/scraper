@@ -1,16 +1,14 @@
-# server.py — Fixed Brand Detection Logic
+# server.py — Fixed Brand Detection Logic + Date Filter + Delete
 import os
 import threading
 import logging
 import datetime
-from flask import Flask, jsonify, render_template, send_from_directory, url_for, request
+from flask import Flask, jsonify, render_template, send_from_directory, url_for, request # request нэмсэн
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from db import banners_col, archive_old_banners, archive_single_banner # <--- archive_single_banner нэмэх
-
 
 import run
-
+from db import banners_col
 
 # Setup
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -22,7 +20,7 @@ IS_RUNNING = False
 LOG_BUFFER = []
 
 # -----------------------------------------------------------
-# 1. БРЭНД ТАНИХ ЛОГИК (ШИНЭЭР НЭМСЭН ХЭСЭГ)
+# 1. БРЭНД ТАНИХ ЛОГИК (Байсан хэвээрээ)
 # -----------------------------------------------------------
 BRAND_MAP = {
     # Banks
@@ -74,20 +72,11 @@ BRAND_MAP = {
 }
 
 def detect_brand(url: str, src: str) -> str:
-    """
-    URL болон зургийн линк дотроос түлхүүр үг хайж
-    брэндийн нэрийг буцаана.
-    """
-    # Бүгдийг жижиг үсэг болгож хайхад бэлдэнэ
     text_to_check = (str(url) + " " + str(src)).lower()
-    
     for key, brand_name in BRAND_MAP.items():
         if key in text_to_check:
             return brand_name
-            
-    return None # Олдохгүй бол None буцаана
-
-# -----------------------------------------------------------
+    return None
 
 def ui_logger(message: str):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -122,7 +111,7 @@ def job_runner(source="Auto"):
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     try:
         scheduler = BackgroundScheduler()
-        scheduler.add_job(job_runner, CronTrigger(hour='9,21', minute=0, timezone='Asia/Ulaanbaatar'), id='daily')
+        scheduler.add_job(job_runner, CronTrigger(hour=9, minute=0, timezone='Asia/Ulaanbaatar'), id='daily')
         scheduler.start()
         print("✅ Scheduler started.")
     except: pass
@@ -131,24 +120,38 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
 
 @app.route("/")
 def index():
-    # 1. Data Fetch
+    # 1. Filter Parameters
+    start_date = request.args.get('start', '')
+    end_date = request.args.get('end', '')
+    
+    query = {}
+    # Огноогоор шүүх (first_seen_date ашиглав)
+    if start_date or end_date:
+        date_filter = {}
+        if start_date:
+            date_filter["$gte"] = start_date
+        if end_date:
+            date_filter["$lte"] = end_date
+        if date_filter:
+            query["first_seen_date"] = date_filter
+
+    # 2. Data Fetch with Filter
     rows = []
     if banners_col is not None:
-        rows = list(banners_col.find({"is_archived": {"$ne": True}}, {"_id": 0}).sort("last_seen_date", -1))
+        # Query дамжуулж шүүлт хийнэ
+        rows = list(banners_col.find(query, {"_id": 0}).sort("last_seen_date", -1))
     
-    # 2. DATA PREPARATION
+    # 3. Process Rows
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     processed_rows = []
 
     for r in rows:
-        # STATUS
         last_seen = r.get("last_seen_date", "")
         if last_seen == today_str:
             r['status'] = '🟢 ИДЭВХТЭЙ'
         else:
             r['status'] = '⚪ ДУУССАН'
 
-        # SCREENSHOT URL
         path = r.get("screenshot_path")
         if path and os.path.exists(path):
             filename = os.path.basename(path)
@@ -156,24 +159,17 @@ def index():
         else:
             r['screenshot_file'] = None
 
-        # --- БРЭНД ТАНИХ ЛОГИК (ЗАСВАРЛАСАН) ---
-        # 1. Landing URL болон SRC-ээс хайна
         landing = r.get('landing_url', '')
         src = r.get('src', '')
-        
         detected = detect_brand(landing, src)
-        
         if detected:
             r['brand'] = detected
         else:
-            # Олдохгүй бол сайтын нэрийг (Жнь: ikon.mn) тавина
-            # Эсвэл "Бусад" гэж болно.
             r['brand'] = r.get('site', 'Бусад')
-        # --------------------------------------
 
         processed_rows.append(r)
 
-    # 3. Check Files
+    # Check Files
     export_dir = os.path.join(os.path.dirname(__file__), "_export")
     xlsx_exists = os.path.exists(os.path.join(export_dir, "summary.xlsx"))
     tsv_exists = os.path.exists(os.path.join(export_dir, "summary.tsv"))
@@ -182,8 +178,38 @@ def index():
         "scraper.html", 
         rows=processed_rows, 
         xlsx_exists=xlsx_exists, 
-        tsv_exists=tsv_exists
+        tsv_exists=tsv_exists,
+        start_date=start_date, # Template руу буцааж илгээнэ
+        end_date=end_date
     )
+
+# --- NEW: DELETE ROUTE ---
+@app.route("/api/delete_banner", methods=["POST"])
+def delete_banner():
+    """
+    Баннерыг DB-ээс устгах. 
+    src болон site хоёр нийлж unique key болдог тул үүгээр нь устгана.
+    """
+    if banners_col is None:
+        return jsonify({"error": "No DB connection"}), 500
+    
+    data = request.json
+    src = data.get("src")
+    site = data.get("site")
+    
+    if not src or not site:
+        return jsonify({"error": "Missing src or site"}), 400
+        
+    try:
+        # Зургийн файлыг мөн устгаж болно (Сонголтоор)
+        # Одоогоор зөвхөн DB-ээс хасъя
+        res = banners_col.delete_one({"src": src, "site": site})
+        if res.deleted_count > 0:
+            return jsonify({"status": "deleted"})
+        else:
+            return jsonify({"error": "Not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/banners/<path:filename>")
 def serve_banner_image(filename):
@@ -213,24 +239,6 @@ def status():
 @app.route("/_debug/last-log")
 def last_log():
     return "\n".join(LOG_BUFFER)
-
-@app.route("/scraper/cleanup", methods=["POST"])
-def cleanup_old_ads():
-    # 7 хоногоос дээш хугацаанд харагдаагүйг архивлах
-    count = archive_old_banners(7)
-    return jsonify({"status": "success", "archived": count})
-
-@app.route("/scraper/archive-one", methods=["POST"])
-def archive_one_ad():
-    data = request.json
-    site = data.get("site")
-    src = data.get("src")
-    
-    if not site or not src:
-        return jsonify({"status": "error", "msg": "Missing data"}), 400
-        
-    success = archive_single_banner(site, src)
-    return jsonify({"status": "success" if success else "failed"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8899, debug=True)
