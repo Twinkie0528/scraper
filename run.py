@@ -93,8 +93,9 @@ def run_pipeline() -> dict:
                     if "screenshot_path" in item and item["screenshot_path"]:
                         # Absolute path руу хөрвүүлэх (хэрэв харьцангуй байвал)
                         if not os.path.isabs(item["screenshot_path"]):
-                            item["screenshot_path"] = os.path.abspath(item["screenshot_path"])
-
+                            filename = os.path.basename(item["screenshot_path"])
+                            item["screenshot_path"] = f"banner_screenshots/{filename}"
+                            
                     # DB руу хадгалах
                     res = upsert_banner(item)
                     

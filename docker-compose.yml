@@ -23,10 +23,13 @@ services:
     environment:
       - MONGO_URI=mongodb://mongo:27017/banner_db
       - TZ=Asia/Ulaanbaatar
+      - FLASK_DEBUG=1  # Flask-ийг auto-reload горимд ажиллуулна
     volumes:
-      # Output хавтаснуудыг гаднаас харахын тулд холбоно
+      # Output хавтаснууд
       - ./_export:/app/_export
       - ./banner_screenshots:/app/banner_screenshots
+      # ЭНЭ МӨРИЙГ НЭМНЭ: Кодыг гаднаас шууд уншина
+      - .:/app
 
 volumes:
   mongo_data:
