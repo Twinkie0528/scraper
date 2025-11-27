@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
-# common.py (v4) — TSV storage + robust HTTP + EXIF/animated handling + brand extraction + pHash config + ad-classifier + upsert
+# common.py (v5) — TSV storage + robust HTTP + EXIF/animated handling + brand extraction + pHash config + ad-classifier + upsert + OCR/Title
 
 import os
 import csv
 import hashlib
 import requests
 import re
+try:
+    import pytesseract
+except ImportError:
+    pytesseract = None # Tesseract байхгүй бол алдаа заахгүй, зүгээр л OCR ажиллахгүй
+
 from io import BytesIO
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
@@ -167,6 +172,38 @@ def phash_hex_from_file(path: str) -> str:
             return phash_hex_from_bytes(f.read())
     except Exception:
         return ""
+
+# ===================== Text Extraction (Title & OCR) =====================
+def get_page_title(url: str) -> str:
+    """Landing URL руу хандаж <title> тагийг татаж авна."""
+    if not url or not url.startswith("http"): return ""
+    try:
+        # Timeout-ийг багаар (3сек) өгөх нь scraper-ийг гацаахгүй байхад чухал
+        resp = _session.get(url, timeout=3)
+        if resp.status_code == 200:
+            # Encoding-ийг таах
+            if resp.encoding is None: resp.encoding = 'utf-8'
+            # Regex ашиглан title-ийг хайх
+            match = re.search(r'<title>(.*?)</title>', resp.text, re.IGNORECASE | re.DOTALL)
+            if match:
+                return match.group(1).strip()
+    except Exception:
+        pass
+    return ""
+
+def extract_text_from_image(img_bytes: bytes) -> str:
+    """Зургийн байт өгөгдлөөс текст унших (OCR)"""
+    if not img_bytes or pytesseract is None: return ""
+    try:
+        img = _img_from_bytes(img_bytes)
+        if img:
+            # Монгол, Англи хэлээр унших (хэрэв tesseract-ocr-mn суусан бол)
+            # Хэрэв tesseract суугаагүй бол алдаа өгч магадгүй, try-except дотор байгаа тул зүгээр
+            text = pytesseract.image_to_string(img, lang='eng+mon') 
+            return text.lower().strip()
+    except Exception:
+        pass
+    return ""
 
 # ===================== Time helpers =====================
 def utc_now_iso() -> str:
@@ -355,9 +392,24 @@ class BannerRecord:
         self.width, self.height = str(width or 0), str(height or 0)
         self.screenshot_path, self.notes = (screenshot_path or ""), (notes or "")
         self.brand = extract_brand_from_url(landing_url)
+        
+        # 2. Title-аас брэнд хайх (ШИНЭ)
+        if not self.brand and landing_url:
+            page_title = get_page_title(landing_url)
+            if page_title:
+                self.notes += f" | Title: {page_title[:50]}"
+                # Жишээ: Хэрэв title-д "Khan Bank" байвал брэндийг таах боломжтой
+                # (Гэхдээ одоохондоо зөвхөн тэмдэглэлд хадгалъя, server.py талд шүүлтүүр хийхэд амар)
+
+        # 3. OCR-аас брэнд хайх (ШИНЭ)
+        if not self.brand and img_bytes:
+            ocr_text = extract_text_from_image(img_bytes)
+            if ocr_text:
+                self.notes += f" | OCR: {ocr_text[:50]}..."
+        
         self.now_iso, self.today = utc_now_iso(), local_today_iso()
         self.is_ad, self.ad_score, self.ad_reason = classify_ad(
-            site, src, landing_url, self.width, self.height, notes, min_ad_score, img_bytes=img_bytes
+            site, src, landing_url, self.width, self.height, self.notes, min_ad_score, img_bytes=img_bytes
         )
         self.ad_id = _stable_ad_id(site, phash_hex, src)
 
@@ -446,6 +498,11 @@ def upsert_banner(rows: List[Dict[str,str]], rec: BannerRecord) -> Tuple[bool,bo
             r["screenshot_path"] = rec.screenshot_path; changed = True
         if not r.get("brand") and rec.brand:
             r["brand"] = rec.brand; changed = True
+        
+        # Шинэ мэдээлэл (Notes) нэмэх
+        if rec.notes and rec.notes not in r.get("notes", ""):
+             r["notes"] = (r.get("notes", "") + " " + rec.notes).strip()
+             changed = True
 
         try:
             old_score = int(r.get("ad_score","0") or "0")
