@@ -1,9 +1,10 @@
-# server.py — Fixed Brand Detection Logic + Date Filter + Delete
+# server.py — Fixed Brand Detection Logic + Date Filter + Cleanup (Hide Old)
 import os
 import threading
 import logging
 import datetime
-from flask import Flask, jsonify, render_template, send_from_directory, url_for, request # request нэмсэн
+from datetime import timedelta # 7 хоногийг тооцоход хэрэгтэй
+from flask import Flask, jsonify, render_template, send_from_directory, url_for, request
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -20,7 +21,7 @@ IS_RUNNING = False
 LOG_BUFFER = []
 
 # -----------------------------------------------------------
-# 1. БРЭНД ТАНИХ ЛОГИК (Байсан хэвээрээ)
+# 1. БРЭНД ТАНИХ ЛОГИК
 # -----------------------------------------------------------
 BRAND_MAP = {
     # Banks
@@ -124,34 +125,39 @@ def index():
     start_date = request.args.get('start', '')
     end_date = request.args.get('end', '')
     
-    query = {}
-    # Огноогоор шүүх (first_seen_date ашиглав)
+    # Үндсэн query: Нуугдсан (hidden=True) заруудыг харуулахгүй
+    query = {"hidden": {"$ne": True}}
+
+    # 2. Date Filter Logic
     if start_date or end_date:
         date_filter = {}
         if start_date:
             date_filter["$gte"] = start_date
         if end_date:
             date_filter["$lte"] = end_date
+        
         if date_filter:
+            # first_seen_date-ээр шүүх (хэрэглэгчийн хүсэлтээр)
             query["first_seen_date"] = date_filter
 
-    # 2. Data Fetch with Filter
+    # 3. Data Fetch
     rows = []
     if banners_col is not None:
-        # Query дамжуулж шүүлт хийнэ
         rows = list(banners_col.find(query, {"_id": 0}).sort("last_seen_date", -1))
     
-    # 3. Process Rows
+    # 4. Process Rows (Status & Brand)
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     processed_rows = []
 
     for r in rows:
+        # STATUS
         last_seen = r.get("last_seen_date", "")
         if last_seen == today_str:
             r['status'] = '🟢 ИДЭВХТЭЙ'
         else:
             r['status'] = '⚪ ДУУССАН'
 
+        # SCREENSHOT URL
         path = r.get("screenshot_path")
         if path and os.path.exists(path):
             filename = os.path.basename(path)
@@ -159,6 +165,7 @@ def index():
         else:
             r['screenshot_file'] = None
 
+        # BRAND DETECTION
         landing = r.get('landing_url', '')
         src = r.get('src', '')
         detected = detect_brand(landing, src)
@@ -169,7 +176,7 @@ def index():
 
         processed_rows.append(r)
 
-    # Check Files
+    # Check Files for Download
     export_dir = os.path.join(os.path.dirname(__file__), "_export")
     xlsx_exists = os.path.exists(os.path.join(export_dir, "summary.xlsx"))
     tsv_exists = os.path.exists(os.path.join(export_dir, "summary.tsv"))
@@ -179,37 +186,85 @@ def index():
         rows=processed_rows, 
         xlsx_exists=xlsx_exists, 
         tsv_exists=tsv_exists,
-        start_date=start_date, # Template руу буцааж илгээнэ
+        start_date=start_date, 
         end_date=end_date
     )
 
-# --- NEW: DELETE ROUTE ---
+# --- NEW: CLEANUP ROUTE (7+ хоногийн өмнөх зарыг нуух) ---
+@app.route("/scraper/cleanup", methods=["POST"])
+def cleanup_old_ads():
+    """
+    Сүүлийн 7 хоногт харагдаагүй (last_seen_date < 7 days ago) заруудыг
+    hidden=True болгож жагсаалтаас нууна (Soft Delete).
+    """
+    if banners_col is None:
+        return jsonify({"error": "No DB connection"}), 500
+
+    try:
+        # 7 хоногийн өмнөх огноог олох
+        cutoff_date = datetime.datetime.now() - timedelta(days=7)
+        cutoff_str = cutoff_date.strftime("%Y-%m-%d")
+
+        # Query: 7 хоногоос өмнө харагдсан БӨГӨӨД одоогоор нуугдаагүй байгаа зарууд
+        filter_query = {
+            "last_seen_date": {"$lt": cutoff_str},
+            "hidden": {"$ne": True}
+        }
+
+        # Update: hidden = True болгох
+        result = banners_col.update_many(filter_query, {"$set": {"hidden": True}})
+        
+        msg = f"Archived {result.modified_count} old banners (older than {cutoff_str})."
+        ui_logger(msg)
+        
+        return jsonify({"status": "success", "archived": result.modified_count})
+
+    except Exception as e:
+        ui_logger(f"Cleanup Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# --- NEW: DELETE ROUTE (Ганц зарыг бүр мөсөн устгах) ---
 @app.route("/api/delete_banner", methods=["POST"])
 def delete_banner():
     """
-    Баннерыг DB-ээс устгах. 
-    src болон site хоёр нийлж unique key болдог тул үүгээр нь устгана.
+    Товчлуур дарахад тухайн зарыг DB-ээс устгах.
     """
     if banners_col is None:
         return jsonify({"error": "No DB connection"}), 500
     
-    data = request.json
-    src = data.get("src")
-    site = data.get("site")
-    
-    if not src or not site:
-        return jsonify({"error": "Missing src or site"}), 400
-        
     try:
-        # Зургийн файлыг мөн устгаж болно (Сонголтоор)
-        # Одоогоор зөвхөн DB-ээс хасъя
+        data = request.json
+        src = data.get("src")
+        site = data.get("site")
+        
+        if not src or not site:
+            return jsonify({"error": "Missing src or site"}), 400
+            
+        # DB-ээс устгах (Hard Delete)
         res = banners_col.delete_one({"src": src, "site": site})
+        
         if res.deleted_count > 0:
-            return jsonify({"status": "deleted"})
+            return jsonify({"status": "success"})
         else:
             return jsonify({"error": "Not found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# --- NEW: ARCHIVE ONE (Ганц зарыг жагсаалтаас нуух - Optional) ---
+# Хэрэв та "Устгах" товчоор бүр мөсөн биш, зүгээр нуухыг хүсвэл үүнийг ашиглаж болно.
+@app.route("/scraper/archive-one", methods=["POST"])
+def archive_one_banner():
+    if banners_col is None: return jsonify({"error": "No DB"}), 500
+    try:
+        data = request.json
+        banners_col.update_one(
+            {"src": data.get("src"), "site": data.get("site")},
+            {"$set": {"hidden": True}}
+        )
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/banners/<path:filename>")
 def serve_banner_image(filename):
