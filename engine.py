@@ -6,7 +6,7 @@ from typing import Dict, List
 from dotenv import load_dotenv 
 
 # .env тохиргоог унших
-load_dotenv()  # <--- ЭНИЙГ НЭМЭХ
+load_dotenv()  
 
 # Import Site Modules
 import gogo_mn
