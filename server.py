@@ -321,14 +321,97 @@ def serve_banner_image(filename):
 @app.route("/download/xlsx")
 @login_required
 def download_xlsx():
-    export_dir = os.path.join(os.path.dirname(__file__), "_export")
-    return send_from_directory(export_dir, "summary.xlsx", as_attachment=True)
+    """MongoDB-ээс шууд XLSX файл үүсгэж татах"""
+    import pandas as pd
+    from io import BytesIO
+    from flask import Response
+    
+    if banners_col is None:
+        return "Database connection error", 500
+    
+    # MongoDB-ээс бүх өгөгдөл татах
+    data = list(banners_col.find({}, {"_id": 0}).sort("last_seen_date", -1))
+    
+    if not data:
+        df = pd.DataFrame(columns=["site", "src", "landing_url", "first_seen_date", "last_seen_date"])
+    else:
+        df = pd.DataFrame(data)
+    
+    # Баганын дараалал
+    preferred_order = [
+        "site", "width", "height", "first_seen_date", "last_seen_date", 
+        "days_seen", "times_seen", "landing_url", "src", "screenshot_path",
+        "ad_score", "ad_reason"
+    ]
+    existing_cols = [c for c in preferred_order if c in df.columns]
+    other_cols = [c for c in df.columns if c not in existing_cols]
+    df = df[existing_cols + other_cols]
+    
+    # Excel файл үүсгэх
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name='Banner Report', index=False)
+        
+        workbook = writer.book
+        worksheet = writer.sheets['Banner Report']
+        header_format = workbook.add_format({
+            'bold': True, 'text_wrap': True, 'valign': 'top',
+            'fg_color': '#D7E4BC', 'border': 1
+        })
+        
+        for col_num, value in enumerate(df.columns.values):
+            worksheet.write(0, col_num, value, header_format)
+            column_len = max(df[value].astype(str).map(len).max() if len(df) > 0 else 10, len(str(value))) + 2
+            worksheet.set_column(col_num, col_num, min(column_len, 60))
+    
+    output.seek(0)
+    
+    filename = f"banner_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return Response(
+        output.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.route("/download/tsv")
 @login_required
 def download_tsv():
-    export_dir = os.path.join(os.path.dirname(__file__), "_export")
-    return send_from_directory(export_dir, "summary.tsv", as_attachment=True)
+    """MongoDB-ээс шууд TSV файл үүсгэж татах"""
+    import pandas as pd
+    from io import StringIO
+    from flask import Response
+    
+    if banners_col is None:
+        return "Database connection error", 500
+    
+    # MongoDB-ээс бүх өгөгдөл татах
+    data = list(banners_col.find({}, {"_id": 0}).sort("last_seen_date", -1))
+    
+    if not data:
+        df = pd.DataFrame(columns=["site", "src", "landing_url", "first_seen_date", "last_seen_date"])
+    else:
+        df = pd.DataFrame(data)
+    
+    # Баганын дараалал
+    preferred_order = [
+        "site", "width", "height", "first_seen_date", "last_seen_date", 
+        "days_seen", "times_seen", "landing_url", "src", "screenshot_path",
+        "ad_score", "ad_reason"
+    ]
+    existing_cols = [c for c in preferred_order if c in df.columns]
+    other_cols = [c for c in df.columns if c not in existing_cols]
+    df = df[existing_cols + other_cols]
+    
+    # TSV үүсгэх
+    output = StringIO()
+    df.to_csv(output, sep='\t', index=False)
+    
+    filename = f"banner_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.tsv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/tab-separated-values",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.route("/scraper/scrape-now", methods=["POST"])
 @login_required
