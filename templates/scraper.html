@@ -296,7 +296,8 @@ a:hover{text-decoration:underline}
                 <td class="c-reason">{{ row.get('ad_reason','') }}</td>
                 <td class="c-action">
                     <button class="btn-del" 
-                            onclick="deleteBanner(this, '{{ row.get('site') }}', '{{ row.get('src') }}')"
+                            data-site="{{ row.get('site', '') }}"
+                            data-src="{{ row.get('src', '') }}"
                             title="Устгах">
                         🗑️
                     </button>
@@ -557,9 +558,15 @@ a:hover{text-decoration:underline}
         window.location.href = url.toString();
     };
 
-    // 2. Delete Banner
-    window.deleteBanner = async function(btn, site, src) {
-        if(!confirm("Энэ зарыг dashboard-оос бүр мөсөн устгах уу?")) return;
+    // 2. Delete Banner - event delegation ашиглах
+    document.addEventListener('click', async function(e) {
+        const btn = e.target.closest('.btn-del');
+        if (!btn) return;
+        
+        if(!confirm("Энэ зарыг dashboard-оос бүр мөсөн устгах у|?")) return;
+
+        const site = btn.dataset.site;
+        const src = btn.dataset.src;
 
         try {
             btn.disabled = true;
@@ -570,7 +577,6 @@ a:hover{text-decoration:underline}
             });
             
             if(res.ok) {
-                // Row-ийг UI-аас хасах
                 const row = btn.closest('tr');
                 row.style.opacity = '0.3';
                 setTimeout(() => row.remove(), 500);
@@ -583,7 +589,7 @@ a:hover{text-decoration:underline}
             alert("Сэрвэр лүү хандаж чадсангүй.");
             btn.disabled = false;
         }
-    };
+    });
 
 })();
 </script>
