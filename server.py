@@ -208,19 +208,40 @@ IS_RUNNING = False
 LOG_BUFFER = []
 
 BRAND_MAP = {
+    # Banks
     "khanbank": "Хаан Банк", "golomt": "Голомт Банк", "tdbm": "ХХБ (TDB)",
     "statebank": "Төрийн Банк", "capitron": "Капитрон", "bogdbank": "Богд Банк",
-    "nibs": "ҮХОБ", "transbank": "Тээвэр Хөгжлийн Банк", "qpay": "QPay",
-    "monpay": "MonPay", "socialpay": "SocialPay", "toki": "Toki",
-    "storepay": "StorePay", "lendmn": "LendMN", "koreanair": "Korean-Air",
+    "nibs": "ҮХОБ", "transbank": "Тээвэр Хөгжлийн Банк", "xacbank": "Хас Банк",
+    "chinggis": "Чингис Хаан Банк",
+    # Payment
+    "qpay": "QPay", "monpay": "MonPay", "socialpay": "SocialPay", 
+    "toki": "Toki", "storepay": "StorePay", "lendmn": "LendMN",
+    "pocket": "Pocket", "most": "Most Money",
+    # Telco
     "unitel": "Unitel", "mobicom": "Mobicom", "skytel": "Skytel",
-    "gogo": "GoGo", "univision": "Univision", "gmobile": "G-MOBILE",
-    "shoppy": "Shoppy", "uran": "Uran", "bsb": "BSB", "pc-mall": "PC Mall",
-    "next": "Next Electronics", "nomin": "Nomin", "emart": "Emart",
-    "cu-mongolia": "CU", "gs25": "GS25", "tavanbogd": "Tavan Bogd",
-    "mcs": "MCS", "apu": "APU", "unegui": "Unegui.mn", "zangia": "Zangia.mn",
-    "ihelp": "iHelp", "bet": "Betting/Gambling", "1xbet": "1xBet",
-    "spoj": "Sport", "Freshpack": "Freshpack", "Esain": "Sain Electronics",
+    "gmobile": "G-Mobile", "univision": "Univision",
+    # Airlines
+    "koreanair": "Korean Air", "hunnu": "Hunnu Air", "miat": "MIAT",
+    # Shopping
+    "shoppy": "Shoppy", "zangia": "Zangia.mn", "unegui": "Unegui.mn",
+    "emart": "Emart", "nomin": "Nomin",
+    # Tech
+    "uran": "Uran", "bsb": "BSB", "pc-mall": "PC Mall",
+    "next": "Next Electronics", "esain": "Sain Electronics", "ibox": "iBox",
+    # Food
+    "tavanbogd": "Tavan Bogd", "mcs": "MCS", "apu": "APU", "gobi": "Gobi",
+    # Insurance
+    "mongoldaatgal": "Монгол Даатгал", "ard": "Ард Даатгал", "mig": "MIG",
+    # Services
+    "ihelp": "iHelp", "gogo": "GoGo",
+    # Betting
+    "bet": "Betting", "1xbet": "1xBet", "melbet": "MelBet",
+    # Others
+    "cu-mongolia": "CU", "gs25": "GS25", "freshpack": "Freshpack",
+    "facebook": "Facebook", "google": "Google",
+    # Sites
+    "bolor.net": "Bolor Toli", "banner.bolor": "Bolor Toli",
+    "boost": "Boost.mn",
 }
 
 def detect_brand(url: str, src: str) -> str:
@@ -278,7 +299,11 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
 def index():
     rows = []
     if banners_col is not None:
-        rows = list(banners_col.find({}, {"_id": 0}).sort("last_seen_date", -1))
+        # archived=True биш зарыг л харуулах
+        rows = list(banners_col.find(
+            {"$or": [{"archived": {"$exists": False}}, {"archived": False}]},
+            {"_id": 0}
+        ).sort("last_seen_date", -1))
     
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     processed_rows = []
@@ -318,10 +343,28 @@ def index():
 def serve_banner_image(filename):
     return send_from_directory("banner_screenshots", filename)
 
+def calculate_actual_days(first_seen, last_seen):
+    """Анх харагдсан болон сүүлд харагдсан огнооны хоорондох өдрийн тоог тооцох"""
+    try:
+        if not first_seen or not last_seen:
+            return 0
+        from datetime import datetime
+        
+        # String бол datetime руу хөрвүүлэх
+        if isinstance(first_seen, str):
+            first_seen = datetime.strptime(first_seen[:10], "%Y-%m-%d")
+        if isinstance(last_seen, str):
+            last_seen = datetime.strptime(last_seen[:10], "%Y-%m-%d")
+        
+        delta = (last_seen - first_seen).days + 1  # +1 учир нь эхний өдрийг оруулна
+        return max(1, delta)
+    except:
+        return 1
+
 @app.route("/download/xlsx")
 @login_required
 def download_xlsx():
-    """MongoDB-ээс шууд XLSX файл үүсгэж татах"""
+    """MongoDB-ээс шууд XLSX файл үүсгэж татах - Brand болон Days тооцоолсон"""
     import pandas as pd
     from io import BytesIO
     from flask import Response
@@ -333,14 +376,27 @@ def download_xlsx():
     data = list(banners_col.find({}, {"_id": 0}).sort("last_seen_date", -1))
     
     if not data:
-        df = pd.DataFrame(columns=["site", "src", "landing_url", "first_seen_date", "last_seen_date"])
+        df = pd.DataFrame(columns=["site", "brand", "src", "landing_url", "first_seen_date", "last_seen_date", "actual_days"])
     else:
+        # Brand болон actual_days нэмэх
+        for row in data:
+            landing = row.get('landing_url', '')
+            src = row.get('src', '')
+            detected = detect_brand(landing, src)
+            row['brand'] = detected if detected else row.get('site', 'Бусад')
+            
+            # Жинхэнэ өдрийн тоог тооцох
+            row['actual_days'] = calculate_actual_days(
+                row.get('first_seen_date'),
+                row.get('last_seen_date')
+            )
+        
         df = pd.DataFrame(data)
     
-    # Баганын дараалал
+    # Баганын дараалал - Brand болон actual_days нэмсэн
     preferred_order = [
-        "site", "width", "height", "first_seen_date", "last_seen_date", 
-        "days_seen", "times_seen", "landing_url", "src", "screenshot_path",
+        "site", "brand", "width", "height", "first_seen_date", "last_seen_date", 
+        "actual_days", "days_seen", "times_seen", "landing_url", "src", "screenshot_path",
         "ad_score", "ad_reason"
     ]
     existing_cols = [c for c in preferred_order if c in df.columns]
@@ -425,6 +481,63 @@ def scrape_now():
 @login_required
 def status():
     return jsonify({"running": IS_RUNNING})
+
+@app.route("/scraper/cleanup", methods=["POST"])
+@login_required
+def cleanup_old_banners():
+    """7+ хоног харагдаагүй зарыг archived болгох"""
+    if banners_col is None:
+        return jsonify({"status": "error", "message": "Database connection error"})
+    
+    try:
+        from datetime import datetime, timedelta
+        
+        # 7 хоногийн өмнөх огноо
+        cutoff_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        # last_seen_date нь 7+ хоногийн өмнөх бүх баннеруудыг archived=True болгох
+        result = banners_col.update_many(
+            {
+                "last_seen_date": {"$lt": cutoff_date},
+                "$or": [
+                    {"archived": {"$exists": False}},
+                    {"archived": False}
+                ]
+            },
+            {"$set": {"archived": True}}
+        )
+        
+        return jsonify({
+            "status": "success",
+            "archived": result.modified_count,
+            "cutoff_date": cutoff_date
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route("/api/delete_banner", methods=["POST"])
+@login_required
+def delete_banner():
+    """Баннерыг бүрмөсөн устгах"""
+    if banners_col is None:
+        return jsonify({"status": "error", "message": "Database connection error"}), 500
+    
+    try:
+        data = request.get_json()
+        site = data.get('site')
+        src = data.get('src')
+        
+        if not site or not src:
+            return jsonify({"status": "error", "message": "Missing site or src"}), 400
+        
+        result = banners_col.delete_one({"site": site, "src": src})
+        
+        if result.deleted_count > 0:
+            return jsonify({"status": "success", "deleted": 1})
+        else:
+            return jsonify({"status": "error", "message": "Banner not found"}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/_debug/last-log")
 @login_required
