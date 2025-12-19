@@ -246,21 +246,33 @@ def job_runner(source="Auto"):
             IS_RUNNING = False
 
 # =====================================================
-# SCHEDULER (ЗАСВАРЛАСАН - Docker-т ажиллана)
+# ✅ SCHEDULER - ӨДӨРТ 2 УДАА (09:00 & 18:00)
 # =====================================================
+# ЧУХАЛ: Ямар ч нөхцөлгүй шууд эхлүүлнэ - Docker/Production-д ажиллана!
 
-# WERKZEUG нөхцөлийг өргөтгөсөн - Production болон Debug хоёуланд ажиллана
-if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-    try:
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(job_runner, CronTrigger(hour=9, minute=0, timezone='Asia/Ulaanbaatar'), id='daily')
-        scheduler.start()
-        print("✅ Scheduler started.")
-    except: 
-        pass
+scheduler = BackgroundScheduler()
+
+# Өглөө 09:00 цагт
+scheduler.add_job(
+    job_runner, 
+    CronTrigger(hour=9, minute=0, timezone='Asia/Ulaanbaatar'), 
+    id='morning_scrape',
+    replace_existing=True
+)
+
+# Орой 18:00 цагт
+scheduler.add_job(
+    job_runner, 
+    CronTrigger(hour=18, minute=0, timezone='Asia/Ulaanbaatar'), 
+    id='evening_scrape',
+    replace_existing=True
+)
+
+scheduler.start()
+print("✅ Scheduler started. Jobs run at 09:00 & 18:00 (Asia/Ulaanbaatar)")
 
 # =====================================================
-# ХУУЧИН ROUTES (LOGIN НЭМСЭН)
+# ROUTES
 # =====================================================
 
 @app.route("/")
@@ -435,4 +447,5 @@ def last_log():
     return "\n".join(LOG_BUFFER)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8899, debug=True)
+    # ⚠️ Production-д debug=False байх ЁСТОЙ!
+    app.run(host="0.0.0.0", port=8899, debug=False)

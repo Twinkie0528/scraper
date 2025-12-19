@@ -1,7 +1,7 @@
 # Base image
 FROM python:3.10-slim
 
-# System dependencies for Playwright & Python
+# System dependencies for Playwright (БҮРЭН ЖАГСААЛТ)
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -19,6 +19,18 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libgbm1 \
     libasound2 \
+    # НЭМСЭН - Playwright-д заавал хэрэгтэй
+    libpango-1.0-0 \
+    libcairo2 \
+    libpangocairo-1.0-0 \
+    libcairo-gobject2 \
+    libgdk-pixbuf-2.0-0 \
+    libgtk-3-0 \
+    libdbus-glib-1-2 \
+    libxt6 \
+    libxaw7 \
+    fonts-liberation \
+    fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 # Set workdir
@@ -28,9 +40,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Browsers (Chromium only to save space)
+# Install Playwright Browsers (Chromium only)
 RUN playwright install chromium
-
+RUN playwright install-deps chromium || true
 
 # Copy Code
 COPY . .
