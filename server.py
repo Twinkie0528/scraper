@@ -1,17 +1,18 @@
-# server.py — MongoDB-based Authentication (No .env password needed)
+# server.py — MongoDB-based Authentication + Fixed Scheduler + Manager Integration
 import os
-import threading
 import logging
 import datetime
 import secrets
 from functools import wraps
-from flask import Flask, jsonify, render_template, send_from_directory, url_for, request, redirect, session, flash
+from flask import Flask, jsonify, render_template, send_from_directory, url_for, request, redirect, session, flash, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-import run
 from db import banners_col, db
+
+# ★ ЗАСВАР: manager.py-г импортлох
+from manager import scraper_manager
 
 # Setup
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -33,17 +34,14 @@ app.config.update(
 # MONGODB-Д ADMIN ХЭРЭГЛЭГЧ УДИРДАХ
 # =====================================================
 
-# Admin collection
 admins_col = db["admins"] if db is not None else None
 
 def get_admin(username):
-    """Admin хэрэглэгчийг DB-ээс авах"""
     if admins_col is None:
         return None
     return admins_col.find_one({"username": username})
 
 def create_default_admin():
-    """Анхны admin хэрэглэгч үүсгэх (хэрэв байхгүй бол)"""
     if admins_col is None:
         return
     
@@ -51,14 +49,13 @@ def create_default_admin():
     if not existing:
         admins_col.insert_one({
             "username": "admin",
-            "password_hash": generate_password_hash("admin123"),  # Анхны нууц үг
+            "password_hash": generate_password_hash("admin123"),
             "created_at": datetime.datetime.utcnow(),
             "updated_at": datetime.datetime.utcnow()
         })
         print("✅ Default admin user created (username: admin, password: admin123)")
 
 def update_admin_password(username, new_password):
-    """Admin нууц үг шинэчлэх"""
     if admins_col is None:
         return False
     
@@ -74,13 +71,11 @@ def update_admin_password(username, new_password):
     return result.modified_count > 0
 
 def verify_admin(username, password):
-    """Admin нэвтрэлт шалгах"""
     admin = get_admin(username)
     if admin and check_password_hash(admin["password_hash"], password):
         return True
     return False
 
-# Сервер эхлэхэд default admin үүсгэх
 create_default_admin()
 
 # =====================================================
@@ -89,7 +84,7 @@ create_default_admin()
 
 LOGIN_ATTEMPTS = {}
 MAX_ATTEMPTS = 5
-LOCKOUT_TIME = 300  # 5 минут
+LOCKOUT_TIME = 300
 
 def is_locked_out(ip):
     if ip not in LOGIN_ATTEMPTS:
@@ -168,10 +163,6 @@ def logout():
     flash('Амжилттай гарлаа.', 'success')
     return redirect(url_for('login'))
 
-# =====================================================
-# НУУЦ ҮГ СОЛИХ (MongoDB-д хадгална)
-# =====================================================
-
 @app.route("/admin/change-password", methods=['GET', 'POST'])
 @login_required
 def change_password():
@@ -198,14 +189,10 @@ def change_password():
     return render_template('change_password.html')
 
 # =====================================================
-# GLOBAL STATE & BRAND DETECTION
+# BRAND DETECTION
 # =====================================================
 
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
-
-SCRAPE_LOCK = threading.Lock()
-IS_RUNNING = False
-LOG_BUFFER = []
 
 BRAND_MAP = {
     # Banks
@@ -239,7 +226,6 @@ BRAND_MAP = {
     # Others
     "cu-mongolia": "CU", "gs25": "GS25", "freshpack": "Freshpack",
     "facebook": "Facebook", "google": "Google",
-    # Sites
     "bolor.net": "Bolor Toli", "banner.bolor": "Bolor Toli",
     "boost": "Boost.mn",
 }
@@ -251,44 +237,44 @@ def detect_brand(url: str, src: str) -> str:
             return brand_name
     return None
 
-def ui_logger(message: str):
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    entry = f"[{timestamp}] {message}"
-    print(entry)
-    global LOG_BUFFER
-    LOG_BUFFER.append(entry)
-    if len(LOG_BUFFER) > 200: LOG_BUFFER.pop(0)
+# =====================================================
+# ★ SCHEDULER SETUP (ЗАСВАРЛАСАН - WERKZEUG нөхцөлгүй)
+# =====================================================
 
-def job_runner(source="Auto"):
-    global IS_RUNNING
-    if IS_RUNNING:
-        ui_logger(f"⚠ {source}: Scraper is busy.")
-        return
-    with SCRAPE_LOCK:
-        IS_RUNNING = True
-        global LOG_BUFFER
-        LOG_BUFFER = []
-        ui_logger(f"🚀 {source}: Starting Pipeline...")
-        try:
-            res = run.run_pipeline()
-            if res.get("status") == "failed":
-                ui_logger(f"❌ Failed: {res.get('error')}")
-            else:
-                stats = res.get("stats", {})
-                ui_logger(f"✅ Done. Total: {stats.get('total_collected')}, New: {stats.get('new_banners')}")
-        except Exception as e:
-            ui_logger(f"❌ Error: {e}")
-        finally:
-            IS_RUNNING = False
+def scheduled_job_runner():
+    """Автоматаар ажиллах үед дуудах функц"""
+    print(f"⏰ Auto-Scheduler: Starting scrape job at {datetime.datetime.now()}")
+    scraper_manager.run_once()
 
-# Scheduler
-if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+# ★ ЗАСВАР: Scheduler-ийг глобал байдлаар эхлүүлнэ (WERKZEUG нөхцөлгүй)
+# Docker/Production орчинд шууд ажиллана
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    scheduled_job_runner, 
+    CronTrigger(hour=9, minute=0, timezone='Asia/Ulaanbaatar'), 
+    id='daily_scrape'
+)
+scheduler.start()
+print("✅ Scheduler started correctly (running in background).")
+
+# =====================================================
+# HELPER FUNCTIONS
+# =====================================================
+
+def calculate_actual_days(first_seen, last_seen):
     try:
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(job_runner, CronTrigger(hour=9, minute=0, timezone='Asia/Ulaanbaatar'), id='daily')
-        scheduler.start()
-        print("✅ Scheduler started.")
-    except: pass
+        if not first_seen or not last_seen:
+            return 0
+        
+        if isinstance(first_seen, str):
+            first_seen = datetime.datetime.strptime(first_seen[:10], "%Y-%m-%d")
+        if isinstance(last_seen, str):
+            last_seen = datetime.datetime.strptime(last_seen[:10], "%Y-%m-%d")
+        
+        delta = (last_seen - first_seen).days + 1
+        return max(1, delta)
+    except:
+        return 1
 
 # =====================================================
 # PROTECTED ROUTES
@@ -299,7 +285,6 @@ if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
 def index():
     rows = []
     if banners_col is not None:
-        # archived=True биш зарыг л харуулах
         rows = list(banners_col.find(
             {"$or": [{"archived": {"$exists": False}}, {"archived": False}]},
             {"_id": 0}
@@ -343,49 +328,26 @@ def index():
 def serve_banner_image(filename):
     return send_from_directory("banner_screenshots", filename)
 
-def calculate_actual_days(first_seen, last_seen):
-    """Анх харагдсан болон сүүлд харагдсан огнооны хоорондох өдрийн тоог тооцох"""
-    try:
-        if not first_seen or not last_seen:
-            return 0
-        from datetime import datetime
-        
-        # String бол datetime руу хөрвүүлэх
-        if isinstance(first_seen, str):
-            first_seen = datetime.strptime(first_seen[:10], "%Y-%m-%d")
-        if isinstance(last_seen, str):
-            last_seen = datetime.strptime(last_seen[:10], "%Y-%m-%d")
-        
-        delta = (last_seen - first_seen).days + 1  # +1 учир нь эхний өдрийг оруулна
-        return max(1, delta)
-    except:
-        return 1
-
 @app.route("/download/xlsx")
 @login_required
 def download_xlsx():
-    """MongoDB-ээс шууд XLSX файл үүсгэж татах - Brand болон Days тооцоолсон"""
+    """MongoDB-ээс шууд XLSX файл үүсгэж татах"""
     import pandas as pd
     from io import BytesIO
-    from flask import Response
     
     if banners_col is None:
         return "Database connection error", 500
     
-    # MongoDB-ээс бүх өгөгдөл татах
     data = list(banners_col.find({}, {"_id": 0}).sort("last_seen_date", -1))
     
     if not data:
         df = pd.DataFrame(columns=["site", "brand", "src", "landing_url", "first_seen_date", "last_seen_date", "actual_days"])
     else:
-        # Brand болон actual_days нэмэх
         for row in data:
             landing = row.get('landing_url', '')
             src = row.get('src', '')
             detected = detect_brand(landing, src)
             row['brand'] = detected if detected else row.get('site', 'Бусад')
-            
-            # Жинхэнэ өдрийн тоог тооцох
             row['actual_days'] = calculate_actual_days(
                 row.get('first_seen_date'),
                 row.get('last_seen_date')
@@ -393,7 +355,6 @@ def download_xlsx():
         
         df = pd.DataFrame(data)
     
-    # Баганын дараалал - Brand болон actual_days нэмсэн
     preferred_order = [
         "site", "brand", "width", "height", "first_seen_date", "last_seen_date", 
         "actual_days", "days_seen", "times_seen", "landing_url", "src", "screenshot_path",
@@ -403,7 +364,6 @@ def download_xlsx():
     other_cols = [c for c in df.columns if c not in existing_cols]
     df = df[existing_cols + other_cols]
     
-    # Excel файл үүсгэх
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='Banner Report', index=False)
@@ -435,12 +395,10 @@ def download_tsv():
     """MongoDB-ээс шууд TSV файл үүсгэж татах"""
     import pandas as pd
     from io import StringIO
-    from flask import Response
     
     if banners_col is None:
         return "Database connection error", 500
     
-    # MongoDB-ээс бүх өгөгдөл татах
     data = list(banners_col.find({}, {"_id": 0}).sort("last_seen_date", -1))
     
     if not data:
@@ -448,7 +406,6 @@ def download_tsv():
     else:
         df = pd.DataFrame(data)
     
-    # Баганын дараалал
     preferred_order = [
         "site", "width", "height", "first_seen_date", "last_seen_date", 
         "days_seen", "times_seen", "landing_url", "src", "screenshot_path",
@@ -458,7 +415,6 @@ def download_tsv():
     other_cols = [c for c in df.columns if c not in existing_cols]
     df = df[existing_cols + other_cols]
     
-    # TSV үүсгэх
     output = StringIO()
     df.to_csv(output, sep='\t', index=False)
     
@@ -469,18 +425,26 @@ def download_tsv():
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+# =====================================================
+# ★ SCRAPER CONTROL (ЗАСВАРЛАСАН - Manager ашиглана)
+# =====================================================
+
 @app.route("/scraper/scrape-now", methods=["POST"])
 @login_required
 def scrape_now():
-    global IS_RUNNING
-    if IS_RUNNING: return jsonify({"status": "busy"})
-    threading.Thread(target=job_runner, args=["Manual"]).start()
-    return jsonify({"status": "started"})
+    """Manual trigger - Manager-ийг ашиглана"""
+    success = scraper_manager.run_once()
+    if success:
+        return jsonify({"status": "started", "message": "Scraper job triggered."})
+    else:
+        return jsonify({"status": "busy", "message": "Scraper is already running."})
 
 @app.route("/scraper/status")
 @login_required
 def status():
-    return jsonify({"running": IS_RUNNING})
+    """Frontend-д лог болон төлөв буцаах - Manager-аас авна"""
+    st = scraper_manager.get_status()
+    return jsonify(st)
 
 @app.route("/scraper/cleanup", methods=["POST"])
 @login_required
@@ -490,12 +454,10 @@ def cleanup_old_banners():
         return jsonify({"status": "error", "message": "Database connection error"})
     
     try:
-        from datetime import datetime, timedelta
+        from datetime import timedelta
         
-        # 7 хоногийн өмнөх огноо
-        cutoff_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        cutoff_date = (datetime.datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         
-        # last_seen_date нь 7+ хоногийн өмнөх бүх баннеруудыг archived=True болгох
         result = banners_col.update_many(
             {
                 "last_seen_date": {"$lt": cutoff_date},
@@ -542,7 +504,10 @@ def delete_banner():
 @app.route("/_debug/last-log")
 @login_required
 def last_log():
-    return "\n".join(LOG_BUFFER)
+    """Хуучин кодтой нийцүүлэх - Manager-аас лог авна"""
+    st = scraper_manager.get_status()
+    return st.get("log", "")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8899, debug=False)
+    # use_reloader=False - Scheduler давхардахаас сэргийлнэ
+    app.run(host="0.0.0.0", port=8899, debug=False, use_reloader=False)
