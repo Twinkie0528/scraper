@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# common.py (v5) — TSV storage + robust HTTP + EXIF/animated handling + brand extraction + pHash config + ad-classifier + upsert + OCR/Title
+# common.py (v6) — TSV storage + robust HTTP + EXIF/animated handling + brand extraction + pHash config + ad-classifier + upsert + OCR/Title
+# ЗАСВАР: times_seen хасагдсан
 
 import os
 import csv
@@ -29,7 +30,7 @@ MAX_BYTES_DEFAULT = int(os.getenv("HTTP_MAX_BYTES", "5000000"))  # 5MB
 CSV_HEADERS = [
     "site", "brand", "banner_key", "phash", "src", "landing_url", "width", "height",
     "first_seen_ts_utc", "last_seen_ts_utc", "first_seen_date", "last_seen_date",
-    "days_seen", "times_seen", "screenshot_path", "notes",
+    "days_seen", "screenshot_path", "notes",
     "is_ad", "ad_score", "ad_reason", "ad_id"
 ]
 
@@ -256,8 +257,8 @@ def _extract_true_url_from_redirect(u: str) -> Optional[str]:
 def extract_brand_from_url(url: str) -> str:
     """
     Landing URL-оос брэндийн нэрийг таамаглана.
-    - Redirect query (adurl/url/u/...) байвал бодит URL руу “өөдрүүлнэ”
-    - Ad network домэйноос “жинхэнэ линк”-ийг дахин шалгана
+    - Redirect query (adurl/url/u/...) байвал бодит URL руу "өөдрүүлнэ"
+    - Ad network домэйноос "жинхэнэ линк"-ийг дахин шалгана
     - tldextract байвал ашиглана (optional), үгүй бол heuristic
     """
     if not url: return ""
@@ -471,7 +472,7 @@ def upsert_banner(rows: List[Dict[str,str]], rec: BannerRecord) -> Tuple[bool,bo
             "src": rec.src, "landing_url": rec.landing_url, "width": rec.width, "height": rec.height,
             "first_seen_ts_utc": rec.now_iso, "last_seen_ts_utc": rec.now_iso,
             "first_seen_date": rec.today, "last_seen_date": rec.today,
-            "days_seen": "1", "times_seen": "1", "screenshot_path": rec.screenshot_path,
+            "days_seen": "1", "screenshot_path": rec.screenshot_path,
             "notes": rec.notes, "is_ad": rec.is_ad, "ad_score": rec.ad_score,
             "ad_reason": rec.ad_reason, "ad_id": rec.ad_id,
         })
@@ -484,7 +485,6 @@ def upsert_banner(rows: List[Dict[str,str]], rec: BannerRecord) -> Tuple[bool,bo
         if old_last != rec.today and rec.today:
             r["days_seen"] = str(int(r.get("days_seen","1") or "1") + 1); changed = True
             r["last_seen_date"] = rec.today
-        r["times_seen"] = str(int(r.get("times_seen","0") or "0") + 1); changed = True
 
         if not r.get("landing_url") and rec.landing_url:
             r["landing_url"] = rec.landing_url; changed = True

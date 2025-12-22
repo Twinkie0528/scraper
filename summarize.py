@@ -12,6 +12,7 @@ import os
 import logging
 import pandas as pd
 from datetime import datetime
+from urllib.parse import urlparse
 import pymongo
 from dotenv import load_dotenv
 
@@ -30,6 +31,64 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/banner_db")
 # Гаралт (Output) хавтас
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPORT_DIR = os.path.join(BASE_DIR, "_export")
+
+# 3. BRAND MAP - Landing URL-аас брэнд таних
+BRAND_MAP = {
+    # Банкууд
+    "khanbank": "Хаан Банк", "golomt": "Голомт Банк", "tdbm": "ХХБ (TDB)",
+    "statebank": "Төрийн Банк", "capitron": "Капитрон", "bogdbank": "Богд Банк",
+    "nibs": "ҮХОБ", "transbank": "Тээвэр Хөгжлийн Банк", "xacbank": "Хас Банк",
+    
+    # Төлбөрийн системүүд
+    "qpay": "QPay", "monpay": "MonPay", "socialpay": "SocialPay",
+    "toki": "Toki", "storepay": "StorePay", "lendmn": "LendMN",
+    
+    # Телеком
+    "unitel": "Unitel", "mobicom": "Mobicom", "skytel": "Skytel",
+    "gmobile": "G-Mobile", "ondo": "Ondo",
+    
+    # Мэдээллийн сайтууд
+    "gogo": "GoGo.mn", "univision": "Univision", "news.mn": "News.mn",
+    "ikon": "Ikon.mn", "caak": "Caak.mn",
+    
+    # Дэлгүүрүүд
+    "shoppy": "Shoppy", "uran": "Uran", "bsb": "BSB", "pc-mall": "PC Mall",
+    "next": "Next Electronics", "nomin": "Nomin", "emart": "Emart",
+    "cu-mongolia": "CU", "gs25": "GS25",
+    
+    # Бусад
+    "tavanbogd": "Tavan Bogd", "mcs": "MCS", "apu": "APU",
+    "unegui": "Unegui.mn", "zangia": "Zangia.mn", "ihelp": "iHelp",
+    "koreanair": "Korean Air", "freshpack": "Freshpack", "sain": "Sain Electronics",
+    
+    # Тоглоом/Бооцоо
+    "bet": "Betting", "1xbet": "1xBet", "melbet": "MelBet",
+}
+
+def detect_brand(landing_url: str, src: str = "") -> str:
+    """Landing URL болон src-аас брэндийг таних"""
+    text_to_check = (str(landing_url) + " " + str(src)).lower()
+    
+    for key, brand_name in BRAND_MAP.items():
+        if key in text_to_check:
+            return brand_name
+    
+    # Хэрэв BRAND_MAP-д байхгүй бол домэйнээс авах оролдлого
+    try:
+        parsed = urlparse(landing_url)
+        hostname = parsed.hostname or ""
+        if hostname:
+            # www. хасах
+            if hostname.startswith("www."):
+                hostname = hostname[4:]
+            # Эхний хэсгийг авах (subdomain-гүй)
+            parts = hostname.split(".")
+            if len(parts) >= 2:
+                return parts[0].title()  # Capitalize
+    except:
+        pass
+    
+    return ""
 
 def get_mongo_data():
     """MongoDB-ээс бүх баннерыг татаж DataFrame болгох"""
@@ -61,20 +120,30 @@ def main():
     if not data:
         logger.warning("⚠ No data found in MongoDB. Report will be empty.")
         # Хоосон ч гэсэн файл үүсгэх (алдаа өгөхгүйн тулд)
-        df = pd.DataFrame(columns=["site", "src", "landing_url", "first_seen_date", "last_seen_date"])
+        df = pd.DataFrame(columns=["site", "brand", "src", "landing_url", "first_seen_date", "last_seen_date", "days_seen"])
     else:
         df = pd.DataFrame(data)
         logger.info(f"✔ Loaded {len(df)} records from MongoDB.")
+        
+        # Brand баганыг нэмэх/шинэчлэх
+        df['brand'] = df.apply(
+            lambda row: detect_brand(row.get('landing_url', ''), row.get('src', '')),
+            axis=1
+        )
+        
+        # times_seen баганыг хасах (хэрэв байвал)
+        if 'times_seen' in df.columns:
+            df = df.drop(columns=['times_seen'])
 
     # Баганын дарааллыг цэгцлэх (Уншихад хялбар болгох)
     preferred_order = [
         "site", 
+        "brand",
         "width", 
         "height", 
         "first_seen_date", 
         "last_seen_date", 
         "days_seen", 
-        "times_seen", 
         "landing_url", 
         "src", 
         "screenshot_path",
@@ -129,6 +198,14 @@ def main():
             logger.info(f"⚠ Saved as backup: {fallback_path}")
         except:
             pass
+    
+    # TSV файл бас үүсгэх
+    tsv_path = os.path.join(EXPORT_DIR, "summary.tsv")
+    try:
+        df.to_csv(tsv_path, sep='\t', index=False, encoding='utf-8')
+        logger.info(f"✅ TSV report generated at: {tsv_path}")
+    except Exception as e:
+        logger.error(f"❌ Failed to write TSV file: {e}")
 
 if __name__ == "__main__":
     main()

@@ -6,6 +6,7 @@ import datetime
 import secrets
 from functools import wraps
 from datetime import timedelta
+from urllib.parse import urlparse
 from flask import Flask, jsonify, render_template, send_from_directory, url_for, request, redirect, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -107,6 +108,12 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get('logged_in'):
+            # AJAX хүсэлт бол JSON error буцаана (redirect хийхгүй)
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or \
+               request.headers.get('X-Requested-With') == 'fetch' or \
+               request.accept_mimetypes.best == 'application/json' or \
+               request.is_json:
+                return jsonify({"error": "unauthorized", "message": "Session expired"}), 401
             flash('Нэвтэрч орно уу.', 'warning')
             return redirect(url_for('login', next=request.url))
         return f(*args, **kwargs)
@@ -190,30 +197,101 @@ IS_RUNNING = False
 LOG_BUFFER = []
 
 # -----------------------------------------------------------
-# 1. БРЭНД ТАНИХ ЛОГИК
+# БРЭНД ТАНИХ ЛОГИК (САЙЖРУУЛСАН)
 # -----------------------------------------------------------
 BRAND_MAP = {
+    # Банкууд
     "khanbank": "Хаан Банк", "golomt": "Голомт Банк", "tdbm": "ХХБ (TDB)",
     "statebank": "Төрийн Банк", "capitron": "Капитрон", "bogdbank": "Богд Банк",
-    "nibs": "ҮХОБ", "transbank": "Тээвэр Хөгжлийн Банк",
+    "nibs": "ҮХОБ", "transbank": "Тээвэр Хөгжлийн Банк", "xacbank": "Хас Банк",
+    
+    # Төлбөрийн системүүд
     "qpay": "QPay", "monpay": "MonPay", "socialpay": "SocialPay",
-    "toki": "Toki", "storepay": "StorePay", "lendmn": "LendMN", "koreanair": "Korean-Air",
+    "toki": "Toki", "storepay": "StorePay", "lendmn": "LendMN",
+    
+    # Телеком
     "unitel": "Unitel", "mobicom": "Mobicom", "skytel": "Skytel",
-    "gogo": "GoGo", "univision": "Univision", "gmobile": "G-MOBILE",
+    "gmobile": "G-Mobile", "ondo": "Ondo",
+    
+    # Мэдээллийн сайтууд
+    "gogo": "GoGo.mn", "univision": "Univision", "news.mn": "News.mn",
+    "ikon": "Ikon.mn", "caak": "Caak.mn",
+    
+    # Дэлгүүрүүд
     "shoppy": "Shoppy", "uran": "Uran", "bsb": "BSB", "pc-mall": "PC Mall",
     "next": "Next Electronics", "nomin": "Nomin", "emart": "Emart",
-    "cu-mongolia": "CU", "gs25": "GS25", "tavanbogd": "Tavan Bogd",
-    "mcs": "MCS", "apu": "APU", "unegui": "Unegui.mn", "zangia": "Zangia.mn",
-    "ihelp": "iHelp", "bet": "Betting/Gambling", "1xbet": "1xBet",
-    "spoj": "Sport", "Freshpack": "Freshpack", "Esain": "Sain Electronics",
+    "cu-mongolia": "CU", "gs25": "GS25",
+    
+    # Бусад
+    "tavanbogd": "Tavan Bogd", "mcs": "MCS", "apu": "APU",
+    "unegui": "Unegui.mn", "zangia": "Zangia.mn", "ihelp": "iHelp",
+    "koreanair": "Korean Air", "freshpack": "Freshpack", "sain": "Sain Electronics",
+    
+    # Тоглоом/Бооцоо
+    "bet": "Betting", "1xbet": "1xBet", "melbet": "MelBet",
+    
+    # Banner сервисүүд (эдгээрийг skip хийх)
+    "banner.bolor": None,  # Banner redirect URL - skip
+    "bit.ly": None,  # Short URL - skip
 }
 
 def detect_brand(url: str, src: str) -> str:
+    """
+    Landing URL болон src-аас брэндийг таних.
+    Redirect URL (banner.bolor.net/pub/jump) байвал query параметрээс бодит URL-г олох оролдлого хийнэ.
+    """
+    if not url:
+        return ""
+    
     text_to_check = (str(url) + " " + str(src)).lower()
+    
+    # Эхлээд BRAND_MAP-аас шууд хайх
     for key, brand_name in BRAND_MAP.items():
+        if brand_name is None:
+            continue  # Skip marker
         if key in text_to_check:
             return brand_name
-    return None
+    
+    # Хэрэв redirect URL бол (banner.bolor.net), query-оос бодит URL олох
+    try:
+        parsed = urlparse(url)
+        if "banner.bolor" in (parsed.hostname or ""):
+            # Query string-аас бодит landing URL олох оролдлого
+            from urllib.parse import parse_qs
+            qs = parse_qs(parsed.query)
+            # Боломжит key-үүд: url, redirect, target, dest
+            for key in ['url', 'redirect', 'target', 'dest', 'u']:
+                if key in qs:
+                    real_url = qs[key][0]
+                    return detect_brand(real_url, "")  # Рекурсив дуудалт
+    except:
+        pass
+    
+    # Хэрэв BRAND_MAP-д байхгүй бол домэйнээс авах оролдлого
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        if hostname:
+            # www. хасах
+            if hostname.startswith("www."):
+                hostname = hostname[4:]
+            
+            # Banner/redirect сервисүүдийг skip
+            skip_hosts = ["banner.bolor", "bit.ly", "goo.gl", "tinyurl", "t.co"]
+            if any(skip in hostname for skip in skip_hosts):
+                return ""
+            
+            # Эхний хэсгийг авах (subdomain-гүй)
+            parts = hostname.split(".")
+            if len(parts) >= 2:
+                # Сүүлийн хоёрыг авах (domain.tld)
+                domain = parts[-2]
+                if len(domain) > 2:  # "mn", "co" гэх мэт богино домэйнүүдийг хасах
+                    return domain.title()  # Capitalize
+    except:
+        pass
+    
+    return ""
 
 def ui_logger(message: str):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -309,7 +387,7 @@ def index():
         if last_seen == today_str:
             r['status'] = '🟢 ИДЭВХТЭЙ'
         else:
-            r['status'] = '⚪ ДУУССАН'
+            r['status'] = '🟠 ДУУССАН'
 
         path = r.get("screenshot_path")
         if path and os.path.exists(path):
@@ -318,13 +396,15 @@ def index():
         else:
             r['screenshot_file'] = None
 
+        # Brand detection (САЙЖРУУЛСАН)
         landing = r.get('landing_url', '')
         src = r.get('src', '')
         detected = detect_brand(landing, src)
         if detected:
             r['brand'] = detected
         else:
-            r['brand'] = r.get('site', 'Бусад')
+            # Хэрэв брэнд олдохгүй бол сайтын нэрийг ашиглана
+            r['brand'] = r.get('site', 'Тодорхойгүй')
 
         processed_rows.append(r)
 
@@ -407,6 +487,39 @@ def archive_one_banner():
             {"$set": {"hidden": True}}
         )
         return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- RECALCULATE DAYS_SEEN (Нэг удаа ажиллуулах) ---
+@app.route("/admin/recalculate-days", methods=["POST"])
+@login_required
+def recalculate_days():
+    """Бүх баннеруудын days_seen-ийг дахин тооцоолох"""
+    if banners_col is None:
+        return jsonify({"error": "No DB connection"}), 500
+    
+    try:
+        fixed_count = 0
+        for banner in banners_col.find({}):
+            first = banner.get("first_seen_date", "")
+            last = banner.get("last_seen_date", "")
+            
+            if first and last:
+                try:
+                    first_dt = datetime.datetime.strptime(first, "%Y-%m-%d")
+                    last_dt = datetime.datetime.strptime(last, "%Y-%m-%d")
+                    correct_days = (last_dt - first_dt).days + 1
+                    
+                    if correct_days != banner.get("days_seen"):
+                        banners_col.update_one(
+                            {"_id": banner["_id"]},
+                            {"$set": {"days_seen": correct_days}}
+                        )
+                        fixed_count += 1
+                except:
+                    pass
+        
+        return jsonify({"status": "success", "fixed": fixed_count})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

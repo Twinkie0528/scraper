@@ -34,7 +34,8 @@ else:
 def upsert_banner(item: dict) -> dict:
     """
     Баннерыг хадгалах эсвэл шинэчлэх.
-    - Хэрэв бүртгэлтэй бол: 'last_seen_date', 'times_seen' шинэчилнэ.
+    - Хэрэв бүртгэлтэй бол: 'last_seen_date' шинэчилнэ.
+    - days_seen: Зөвхөн өөр өдөр харагдсан үед л нэмэгдэнэ.
     - Хэрэв шинэ бол: Шинээр үүсгэнэ.
     """
     if banners_col is None: return {"status": "error", "reason": "no_db"}
@@ -50,39 +51,58 @@ def upsert_banner(item: dict) -> dict:
     # Хайх нөхцөл: Нэг сайт дээрх нэг зураг
     filter_q = {"src": src, "site": site}
     
-    # Шинэчлэх үйлдлүүд
-    update_doc = {
-        "$set": {
+    # Эхлээд одоо байгаа бичлэгийг шалгах
+    existing = banners_col.find_one(filter_q)
+    
+    if existing:
+        # UPDATE: Бичлэг байгаа
+        update_fields = {
             "last_seen_date": today_str,
             "landing_url": item.get("landing_url"),
             "screenshot_path": item.get("screenshot_path"),
             "width": item.get("width"),
             "height": item.get("height"),
             "updated_at": datetime.utcnow()
-        },
-        "$setOnInsert": {
-            "first_seen_date": today_str,
+        }
+        
+        # days_seen: Зөвхөн өөр өдөр бол нэмэгдүүлнэ
+        old_last_seen = existing.get("last_seen_date", "")
+        if old_last_seen != today_str:
+            # Өөр өдөр тул days_seen нэмэгдүүлнэ
+            current_days = existing.get("days_seen", 1) or 1
+            update_fields["days_seen"] = current_days + 1
+        
+        try:
+            banners_col.update_one(filter_q, {"$set": update_fields})
+            return {"status": "success", "new": False}
+        except Exception as e:
+            print(f"DB Update Error: {e}")
+            return {"status": "error", "error": str(e)}
+    else:
+        # INSERT: Шинэ бичлэг
+        new_doc = {
             "site": site,
             "src": src,
+            "first_seen_date": today_str,
+            "last_seen_date": today_str,
+            "days_seen": 1,
+            "landing_url": item.get("landing_url"),
+            "screenshot_path": item.get("screenshot_path"),
+            "width": item.get("width"),
+            "height": item.get("height"),
             "ad_score": item.get("ad_score", 0),
             "ad_reason": item.get("ad_reason", ""),
             "notes": item.get("notes", ""),
-            "created_at": datetime.utcnow()
-        },
-        "$inc": {
-            "times_seen": 1,
-            "days_seen": 1 # Өдөрт нэг удаа ажиллана гэж тооцов
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
         }
-    }
-
-    try:
-        result = banners_col.update_one(filter_q, update_doc, upsert=True)
-        # upserted_id байвал шинээр үүссэн гэсэн үг
-        is_new = result.upserted_id is not None
-        return {"status": "success", "new": is_new}
-    except Exception as e:
-        print(f"DB Error: {e}")
-        return {"status": "error", "error": str(e)}
+        
+        try:
+            banners_col.insert_one(new_doc)
+            return {"status": "success", "new": True}
+        except Exception as e:
+            print(f"DB Insert Error: {e}")
+            return {"status": "error", "error": str(e)}
 
 def save_run(record: dict):
     """
@@ -185,6 +205,36 @@ def archive_old_banners(days_threshold: int = 7) -> int:
         return 0
 
 
+def recalculate_days_seen():
+    """
+    Бүх баннеруудын days_seen-ийг first_seen_date болон last_seen_date-аас дахин тооцоолох.
+    Нэг удаа ажиллуулж буруу өгөгдлийг засна.
+    """
+    if banners_col is None: return 0
     
-    
-    
+    fixed_count = 0
+    try:
+        for banner in banners_col.find({}):
+            first = banner.get("first_seen_date", "")
+            last = banner.get("last_seen_date", "")
+            
+            if first and last:
+                try:
+                    first_dt = datetime.strptime(first, "%Y-%m-%d")
+                    last_dt = datetime.strptime(last, "%Y-%m-%d")
+                    correct_days = (last_dt - first_dt).days + 1
+                    
+                    if correct_days != banner.get("days_seen"):
+                        banners_col.update_one(
+                            {"_id": banner["_id"]},
+                            {"$set": {"days_seen": correct_days}}
+                        )
+                        fixed_count += 1
+                except:
+                    pass
+        
+        print(f"✅ Recalculated days_seen for {fixed_count} banners")
+        return fixed_count
+    except Exception as e:
+        print(f"Recalculate Error: {e}")
+        return 0

@@ -261,11 +261,9 @@ a:hover{text-decoration:underline}
                     <th>Анх харагдсан</th>
                     <th>Сүүлд харагдсан</th>
                     <th>Нийт өдөр</th>
-                    <th>Нийт удаа</th>
                     <th>Оноо</th>
                     <th>Screenshot</th>
                     <th>Landing URL</th>
-                    <th>Шалтгаан</th>
                     <th style="width: 50px;">Үйлдэл</th>
                 </tr>
             </thead>
@@ -283,7 +281,6 @@ a:hover{text-decoration:underline}
                 <td class="c-first">{{ row.get('first_seen_date','') or '-' }}</td>
                 <td class="c-last">{{ row.get('last_seen_date','') or '-' }}</td>
                 <td class="c-days">{{ row.get('days_seen','') or '-' }}</td>
-                <td class="c-times">{{ row.get('times_seen','') or '-' }}</td>
                 <td class="c-score">{{ row.get('ad_score','') or '-' }}</td>
                 <td class="c-shot">
                     {% set shot = row.get('screenshot_file') %}
@@ -293,7 +290,6 @@ a:hover{text-decoration:underline}
                     {% set land = row.get('landing_url') or row.get('landing_open') %}
                     {% if land and land != '#' %}<a href="{{ land }}" target="_blank" rel="noopener">Линк</a>{% else %}-{% endif %}
                 </td>
-                <td class="c-reason">{{ row.get('ad_reason','') }}</td>
                 <td class="c-action">
                     <button class="btn-del" 
                             data-site="{{ row.get('site', '') }}"
@@ -387,6 +383,11 @@ a:hover{text-decoration:underline}
     async function fetchLog(){
         try{
             const res = await fetch('/_debug/last-log', {cache:'no-store'});
+            if(res.status === 401) {
+                // Session expired - login руу шилжүүлэх
+                window.location.href = '/login';
+                return;
+            }
             if(!res.ok) return;
             const txt = await res.text();
             logWrap.innerHTML = txt;
@@ -399,6 +400,10 @@ a:hover{text-decoration:underline}
             btn.disabled = true;
             setBanner('info','Scraper эхлүүлж байна…','',true);
             const res = await fetch('/scraper/scrape-now', { method:'POST', headers:{'X-Requested-With':'fetch'} });
+            if(res.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
             startTimers();
             pollStatus(true);
         }catch(e){
@@ -413,7 +418,12 @@ a:hover{text-decoration:underline}
         if(pollTimer && !force) return;
         pollTimer = setInterval(async ()=>{
             try{
-                const res = await fetch('/scraper/status?ts=' + Date.now(), {cache:'no-store'});
+                const res = await fetch('/scraper/status?ts=' + Date.now(), {cache:'no-store', headers:{'X-Requested-With':'fetch'}});
+                if(res.status === 401) {
+                    clearInterval(pollTimer); pollTimer=null; stopTimers();
+                    window.location.href = '/login';
+                    return;
+                }
                 if(!res.ok) throw new Error(res.status);
                 const st = await res.json();
                 if(st.running){
@@ -480,7 +490,6 @@ a:hover{text-decoration:underline}
             rows.forEach(r=>{
                 const hay = (
                     (r.querySelector('.c-brand')?.innerText||'') + ' ' +
-                    (r.querySelector('.c-reason')?.innerText||'') + ' ' +
                     (r.querySelector('.c-landing')?.innerText||'') + ' ' +
                     (r.querySelector('.c-site')?.innerText||'')
                 ).toLowerCase();
@@ -563,7 +572,7 @@ a:hover{text-decoration:underline}
         const btn = e.target.closest('.btn-del');
         if (!btn) return;
         
-        if(!confirm("Энэ зарыг dashboard-оос бүр мөсөн устгах у|?")) return;
+        if(!confirm("Энэ зарыг dashboard-оос бүр мөсөн устгах уу?")) return;
 
         const site = btn.dataset.site;
         const src = btn.dataset.src;
