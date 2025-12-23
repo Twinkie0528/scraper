@@ -65,7 +65,7 @@ Two-level deduplication implemented:
 
 Updated `_shot()` function in all scrapers:
 ```python
-def _shot(output_dir, src, i):
+def _shot(output_dir, src):
     md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
     filename = f"gogo_{md5_hash}.png"
     return os.path.join(output_dir, filename)
@@ -74,7 +74,7 @@ def _shot(output_dir, src, i):
 #### 4.2 File Existence Check
 Before downloading/screenshotting, check if file exists:
 ```python
-shot = _shot(output_dir, src, i)
+shot = _shot(output_dir, src)
 # MD5 deduplication: Skip if file already exists
 if os.path.exists(shot):
     continue
