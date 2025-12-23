@@ -8,7 +8,7 @@ import logging
 import urllib.parse
 from typing import List, Dict, Set
 from playwright.sync_api import sync_playwright
-from common import ensure_dir, http_get_bytes, classify_ad
+from core.common import ensure_dir, http_get_bytes, classify_ad
 
 HOME = "https://bolor-toli.com"
 
@@ -19,7 +19,9 @@ def _host(u: str) -> str:
     except Exception: return ""
 
 def _shot(output_dir: str, src: str, i: int) -> str:
-    return os.path.join(output_dir, f"bolortoli_{int(time.time())}_{i}_{hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]}.png")
+    md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
+    filename = f"bolortoli_{md5_hash}.png"
+    return os.path.join(output_dir, filename)
 
 def _prime_page(page) -> None:
     for _ in range(3):
@@ -64,6 +66,10 @@ def _collect_bolortoli(page, output_dir: str, seen: Set[str], ads_only: bool, mi
             
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
+            # MD5 deduplication: Skip if file already exists
+            if os.path.exists(shot_path):
+                continue
+            
             el.screenshot(path=shot_path)
             img_bytes = http_get_bytes(src, referer=HOME)
             out.append({"site": site_host, "src": src, "landing_url": landing, "img_bytes": img_bytes, "width": w, "height": hgt, "screenshot_path": shot_path, "notes": "onpage"})

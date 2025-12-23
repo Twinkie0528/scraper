@@ -6,7 +6,7 @@ import hashlib
 import urllib.parse
 from typing import List, Dict, Set
 from playwright.sync_api import sync_playwright, Error as PlaywrightError
-from common import ensure_dir, http_get_bytes, classify_ad
+from core.common import ensure_dir, http_get_bytes, classify_ad
 
 HOME = "https://www.caak.mn/"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -26,7 +26,9 @@ def _host(u: str) -> str:
         return ""
 
 def _shot(output_dir: str, src: str, i: int) -> str:
-    return os.path.join(output_dir, f"caak_{int(time.time())}_{i}_{hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]}.png")
+    md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
+    filename = f"caak_{md5_hash}.png"
+    return os.path.join(output_dir, filename)
 
 def _prime_page(page) -> None:
     # Lazy load зургуудыг хүчээр дуудах
@@ -62,6 +64,10 @@ def _collect_caak(page, output_dir: str, seen: Set[str], ads_only: bool, min_sco
 
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
+            # MD5 deduplication: Skip if file already exists
+            if os.path.exists(shot_path):
+                continue
+            
             try: el.screenshot(path=shot_path)
             except: pass
             
@@ -106,6 +112,10 @@ def _collect_caak(page, output_dir: str, seen: Set[str], ads_only: bool, min_sco
 
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
+            # MD5 deduplication: Skip if file already exists
+            if os.path.exists(shot_path):
+                continue
+            
             try: el.screenshot(path=shot_path)
             except: pass
             

@@ -2,6 +2,7 @@
 import concurrent.futures
 import traceback
 import os
+from datetime import datetime
 from typing import Dict, List
 from dotenv import load_dotenv 
 
@@ -9,13 +10,13 @@ from dotenv import load_dotenv
 load_dotenv()  
 
 # Import Site Modules
-import gogo_mn
-import ikon_mn
-import news_mn
-import ublife_mn
-import lemonpress_mn
-import caak_mn
-import bolortoli_mn
+from sites import gogo_mn
+from sites import ikon_mn
+from sites import news_mn
+from sites import ublife_mn
+from sites import lemonpress_mn
+from sites import caak_mn
+from sites import bolortoli_mn
 
 # Define sites config for scalability
 SITES_CONFIG = [
@@ -44,6 +45,10 @@ def _scrape_wrapper(site_conf: Dict) -> Dict[str, List]:
     # Headless горим сервер дээр заавал 1 байх ёстой
     headless = os.getenv("HEADLESS", "1") == "1"
     
+    # 2. Daily folder structure
+    today = datetime.now().strftime("%Y-%m-%d")
+    output_dir = f"./banner_screenshots/{today}"
+    
     print(f"⏳ Starting: {name} (Dwell: {dwell}s, Score: {min_score}, Headless: {headless})...")
     try:
         prefix = name.split('_')[0] 
@@ -53,7 +58,7 @@ def _scrape_wrapper(site_conf: Dict) -> Dict[str, List]:
             scraper_func = getattr(mod, func_name)
             # 2. Тохиргоонуудыг функц рүү дамжуулах
             results = scraper_func(
-                output_dir="./banner_screenshots", 
+                output_dir=output_dir, 
                 headless=headless,
                 dwell_seconds=dwell,
                 ads_only=ads_only,

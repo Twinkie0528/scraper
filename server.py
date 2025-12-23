@@ -13,7 +13,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import run
-from db import banners_col, db
+from core.db import banners_col, db
 
 # Setup
 app = Flask(__name__, template_folder="templates", static_folder="static")

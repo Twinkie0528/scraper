@@ -7,7 +7,7 @@ import logging
 import urllib.parse
 from typing import List, Dict, Set
 from playwright.sync_api import sync_playwright
-from common import ensure_dir, http_get_bytes, classify_ad
+from core.common import ensure_dir, http_get_bytes, classify_ad
 
 HOME = "https://lemonpress.mn"
 CAT_URL = "https://lemonpress.mn/category/surtalchilgaa"
@@ -22,7 +22,9 @@ def _host(u: str) -> str:
     except Exception: return ""
 
 def _shot(output_dir: str, src: str, i: int) -> str:
-    return os.path.join(output_dir, f"lemonpress_{int(time.time())}_{i}_{hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]}.png")
+    md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
+    filename = f"lemonpress_{md5_hash}.png"
+    return os.path.join(output_dir, filename)
 
 def _scroll_full_page(page):
     """Хуудсыг бүхэлд нь доош гүйлгэж Lazy Load зургуудыг дуудна"""
@@ -68,6 +70,10 @@ def _collect_lemonpress(page, output_dir: str, seen: Set[str], ads_only: bool, m
 
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
+            # MD5 deduplication: Skip if file already exists
+            if os.path.exists(shot_path):
+                continue
+            
             try: 
                 el.scroll_into_view_if_needed(timeout=2000)
                 el.screenshot(path=shot_path)
@@ -125,6 +131,10 @@ def _collect_lemonpress(page, output_dir: str, seen: Set[str], ads_only: bool, m
 
             seen.add(src)
             shot_path = _shot(output_dir, src, len(out))
+            
+            # MD5 deduplication: Skip if file already exists
+            if os.path.exists(shot_path):
+                continue
             
             try: 
                 el.scroll_into_view_if_needed(timeout=2000)

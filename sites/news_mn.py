@@ -2,12 +2,14 @@
 import os, time, hashlib
 from typing import List, Dict, Set
 from playwright.sync_api import sync_playwright
-from common import ensure_dir, http_get_bytes, classify_ad
+from core.common import ensure_dir, http_get_bytes, classify_ad
 
-HOME = "https://gogo.mn"
+HOME = "https://news.mn"
 
 def _shot(output_dir, src, i):
-    return os.path.join(output_dir, f"gogo_{int(time.time())}_{i}_{hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]}.png")
+    md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
+    filename = f"news_{md5_hash}.png"
+    return os.path.join(output_dir, filename)
 
 def _collect_imgs(page, output_dir, seen:Set[str], ads_only:bool, min_score:int) -> List[Dict]:
     out: List[Dict] = []
@@ -35,22 +37,26 @@ def _collect_imgs(page, output_dir, seen:Set[str], ads_only:bool, min_score:int)
         except Exception: pass
         if not landing: landing = HOME
 
-        is_ad, score, reason = classify_ad("gogo.mn", src, landing, str(int(bbox["width"])), str(int(bbox["height"])), ("iframe" if tag=="iframe" else "onpage"), min_score=min_score)
+        is_ad, score, reason = classify_ad("news.mn", src, landing, str(int(bbox["width"])), str(int(bbox["height"])), ("iframe" if tag=="iframe" else "onpage"), min_score=min_score)
         if ads_only and is_ad != "1":
             continue
 
-        img_bytes = http_get_bytes(src, referer=HOME)
         shot = _shot(output_dir, src, i)
+        # MD5 deduplication: Skip if file already exists
+        if os.path.exists(shot):
+            continue
+
+        img_bytes = http_get_bytes(src, referer=HOME)
         try: el.screenshot(path=shot)
         except Exception: shot = ""
         out.append({
-            "site":"gogo.mn","src":src,"landing_url":landing,
+            "site":"news.mn","src":src,"landing_url":landing,
             "img_bytes":img_bytes,"width":int(bbox["width"]),"height":int(bbox["height"]),
             "screenshot_path":shot,"notes":("video_poster" if tag=="video" else ("iframe" if tag=="iframe" else "onpage")),
         })
     return out
 
-def scrape_gogo(output_dir: str, dwell_seconds:int=45, headless:bool=True, ads_only:bool=True, min_score:int=2) -> List[Dict]:
+def scrape_news(output_dir: str, dwell_seconds:int=45, headless:bool=True, ads_only:bool=True, min_score:int=2) -> List[Dict]:
     ensure_dir(output_dir)
     seen: Set[str] = set(); out: List[Dict] = []
     with sync_playwright() as p:
