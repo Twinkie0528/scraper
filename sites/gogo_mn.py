@@ -6,7 +6,7 @@ from core.common import ensure_dir, http_get_bytes, classify_ad
 
 HOME = "https://gogo.mn"
 
-def _shot(output_dir, src, i):
+def _shot(output_dir, src):
     md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
     filename = f"gogo_{md5_hash}.png"
     return os.path.join(output_dir, filename)
@@ -41,7 +41,7 @@ def _collect_imgs(page, output_dir, seen:Set[str], ads_only:bool, min_score:int)
         if ads_only and is_ad != "1":
             continue
 
-        shot = _shot(output_dir, src, i)
+        shot = _shot(output_dir, src)
         # MD5 deduplication: Skip if file already exists
         if os.path.exists(shot):
             continue

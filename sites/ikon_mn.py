@@ -19,7 +19,7 @@ AD_PATH_HINT = "/ad/"
 RELOAD_ROUNDS = 2 # Нэг /ad/ хуудсыг хэдэн удаа дахин ачааллах
 MIN_W, MIN_H = 100, 100
 
-def _shot(output_dir: str, src: str, i: int) -> str:
+def _shot(output_dir: str, src: str) -> str:
     """Screenshot-ын замыг үүсгэх."""
     md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
     filename = f"ikon_{md5_hash}.png"
@@ -113,7 +113,7 @@ def watch_and_capture_variants(context: BrowserContext, ad_url: str, output_dir:
 
                         if w < MIN_W or h < MIN_H: continue
 
-                        shot_path = _shot(output_dir, abs_url, len(captures) + 1)
+                        shot_path = _shot(output_dir, abs_url)
                         
                         # MD5 deduplication: Skip if file already exists
                         if os.path.exists(shot_path):

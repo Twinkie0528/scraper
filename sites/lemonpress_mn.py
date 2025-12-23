@@ -21,7 +21,7 @@ def _host(u: str) -> str:
         return hostname[4:] if hostname.startswith('www.') else hostname
     except Exception: return ""
 
-def _shot(output_dir: str, src: str, i: int) -> str:
+def _shot(output_dir: str, src: str) -> str:
     md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
     filename = f"lemonpress_{md5_hash}.png"
     return os.path.join(output_dir, filename)
@@ -69,7 +69,7 @@ def _collect_lemonpress(page, output_dir: str, seen: Set[str], ads_only: bool, m
                     continue
 
             seen.add(src)
-            shot_path = _shot(output_dir, src, len(out))
+            shot_path = _shot(output_dir, src)
             # MD5 deduplication: Skip if file already exists
             if os.path.exists(shot_path):
                 continue
@@ -130,7 +130,7 @@ def _collect_lemonpress(page, output_dir: str, seen: Set[str], ads_only: bool, m
                     continue
 
             seen.add(src)
-            shot_path = _shot(output_dir, src, len(out))
+            shot_path = _shot(output_dir, src)
             
             # MD5 deduplication: Skip if file already exists
             if os.path.exists(shot_path):
