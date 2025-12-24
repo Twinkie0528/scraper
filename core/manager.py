@@ -4,7 +4,7 @@ import threading
 import os
 import time
 
-SCRAPER_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRAPER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Parent of core/
 RUN_PY = os.path.join(SCRAPER_DIR, "run.py")
 
 class ScraperManager:
@@ -52,9 +52,10 @@ class ScraperManager:
 
                 self.append_log("✔ RUN.PY дууслаа. Summary үүсгэж байна...")
 
-                # summary.py ажиллуулах
+                # summary.py ажиллуулах (parent directory-аас)
+                summarize_path = os.path.join(SCRAPER_DIR, "summarize.py")
                 subprocess.run(
-                    ["python", "summarize.py"],
+                    ["python", summarize_path],
                     cwd=SCRAPER_DIR,
                     check=False
                 )

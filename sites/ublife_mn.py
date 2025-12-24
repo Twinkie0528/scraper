@@ -3,15 +3,14 @@
 import os, time, hashlib
 from typing import List, Dict, Set
 from playwright.sync_api import sync_playwright
-from common import ensure_dir, http_get_bytes, classify_ad
+from core.common import ensure_dir, http_get_bytes, classify_ad
 
 HOME = "https://ublife.mn/"
 
-def _shot(output_dir: str, src: str, i: int) -> str:
-    return os.path.join(
-        output_dir,
-        f"ublife_{int(time.time())}_{i}_{hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]}.png"
-    )
+def _shot(output_dir: str, src: str) -> str:
+    md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
+    filename = f"ublife_{md5_hash}.png"
+    return os.path.join(output_dir, filename)
 
 def _collect_imgs(page, output_dir: str, seen: Set[str], ads_only: bool, min_score: int) -> List[Dict]:
     out: List[Dict] = []
@@ -73,8 +72,12 @@ def _collect_imgs(page, output_dir: str, seen: Set[str], ads_only: bool, min_sco
             continue
 
         # Bytes + screenshot
+        shot = _shot(output_dir, src)
+        # MD5 deduplication: Skip if file already exists
+        if os.path.exists(shot):
+            continue
+
         img_bytes = http_get_bytes(src, referer=HOME)
-        shot = _shot(output_dir, src, i)
         try:
             el.screenshot(path=shot)
         except Exception:
@@ -96,7 +99,7 @@ def scrape_ublife(output_dir: str, dwell_seconds: int = 45, headless: bool = Tru
                   ads_only: bool = True, min_score: int = 3) -> List[Dict]:
     """
     Ашиглах жишээ:
-        from ublife_mn import scrape_ublife
+        from sites.ublife_mn import scrape_ublife
         items = scrape_ublife("./banner_screenshots/2025-10-10",
                               dwell_seconds=45, headless=True, ads_only=True, min_score=3)
     """

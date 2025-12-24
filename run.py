@@ -16,10 +16,10 @@ import traceback
 from datetime import datetime, date
 
 # Өөрсдийн бичсэн модулиуд
-import engine       # Parallel scraping engine
+from core import engine       # Parallel scraping engine
 import summarize    # Report generator
-from common import ensure_dir
-from db import upsert_banner, save_run, update_daily_summary, check_connection
+from core.common import ensure_dir
+from core.db import upsert_banner, save_run, update_daily_summary, check_connection
 
 # Logging тохиргоо
 

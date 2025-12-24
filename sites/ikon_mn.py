@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 from typing import List, Dict, Set, Optional, Tuple
 
 from playwright.sync_api import sync_playwright, Page, BrowserContext, TimeoutError as PWTimeout
-from common import ensure_dir, http_get_bytes # Таны common.py-аас импорт хийнэ
+from core.common import ensure_dir, http_get_bytes # Таны common.py-аас импорт хийнэ
 
 HOME = "https://ikon.mn"
 AD_PATH_HINT = "/ad/"
@@ -19,9 +19,11 @@ AD_PATH_HINT = "/ad/"
 RELOAD_ROUNDS = 2 # Нэг /ad/ хуудсыг хэдэн удаа дахин ачааллах
 MIN_W, MIN_H = 100, 100
 
-def _shot(output_dir: str, src: str, i: int) -> str:
+def _shot(output_dir: str, src: str) -> str:
     """Screenshot-ын замыг үүсгэх."""
-    return os.path.join(output_dir, f"ikon_{int(time.time())}_{i}_{hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]}.png")
+    md5_hash = hashlib.md5(src.encode('utf-8','ignore')).hexdigest()[:8]
+    filename = f"ikon_{md5_hash}.png"
+    return os.path.join(output_dir, filename)
 
 def _host(u: str) -> str:
     """URL-аас host-ийг салгах."""
@@ -111,10 +113,15 @@ def watch_and_capture_variants(context: BrowserContext, ad_url: str, output_dir:
 
                         if w < MIN_W or h < MIN_H: continue
 
+                        shot_path = _shot(output_dir, abs_url)
+                        
+                        # MD5 deduplication: Skip if file already exists
+                        if os.path.exists(shot_path):
+                            continue
+
                         img_bytes = http_get_bytes(abs_url, referer=ad_url)
                         if not img_bytes: continue
                         
-                        shot_path = _shot(output_dir, abs_url, len(captures) + 1)
                         el.screenshot(path=shot_path)
                         
                         click_url = _guess_click_url(page)
