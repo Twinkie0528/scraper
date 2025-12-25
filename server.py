@@ -4,6 +4,7 @@ import threading
 import logging
 import datetime
 import secrets
+import glob
 from functools import wraps
 from datetime import timedelta
 from urllib.parse import urlparse
@@ -324,6 +325,56 @@ def job_runner(source="Auto"):
             IS_RUNNING = False
 
 # =====================================================
+# ✅ SCREENSHOT FINDER - ХУУЧИН/ШИНЭ ЗАМЫГ ДЭМЖИХ
+# =====================================================
+
+def find_screenshot(screenshot_path: str) -> tuple:
+    """
+    Screenshot файлыг олох функц.
+    Хуучин (daily folder-гүй) болон шинэ (daily folder-тэй) замуудыг дэмжинэ.
+    
+    Returns:
+        tuple: (found_path, relative_path) эсвэл (None, None)
+    """
+    if not screenshot_path:
+        return None, None
+    
+    # 1. Шууд өгөгдсөн замаар шалгах
+    norm_path = os.path.normpath(screenshot_path)
+    if os.path.exists(norm_path):
+        try:
+            rel_path = os.path.relpath(norm_path, "banner_screenshots")
+            rel_path = rel_path.replace("\\", "/")
+            return norm_path, rel_path
+        except ValueError:
+            pass
+    
+    # 2. Filename авч, daily folder-уудаас хайх
+    filename = os.path.basename(screenshot_path)
+    
+    # banner_screenshots дотор бүх daily folder-уудыг шалгах
+    screenshots_dir = "banner_screenshots"
+    if os.path.exists(screenshots_dir):
+        # Эхлээд root-оос хайх (хуучин файлуудын хувьд)
+        root_path = os.path.join(screenshots_dir, filename)
+        if os.path.exists(root_path):
+            return root_path, filename
+        
+        # Дараа нь daily folder-уудаас хайх (шинэ файлуудын хувьд)
+        # glob ашиглан YYYY-MM-DD хэлбэрийн folder-уудыг олох
+        pattern = os.path.join(screenshots_dir, "????-??-??", filename)
+        matches = glob.glob(pattern)
+        if matches:
+            # Хамгийн сүүлийн огноотойг авах (sorted reverse)
+            matches.sort(reverse=True)
+            found_path = matches[0]
+            rel_path = os.path.relpath(found_path, screenshots_dir)
+            rel_path = rel_path.replace("\\", "/")
+            return found_path, rel_path
+    
+    return None, None
+
+# =====================================================
 # ✅ SCHEDULER - ӨДӨРТ 2 УДАА (09:00 & 18:00)
 # =====================================================
 # ЧУХАЛ: Ямар ч нөхцөлгүй шууд эхлүүлнэ - Docker/Production-д ажиллана!
@@ -389,10 +440,12 @@ def index():
         else:
             r['status'] = '🟠 ДУУССАН'
 
+        # ✅ ШИНЭ: Screenshot finder ашиглах (хуучин/шинэ зам дэмжинэ)
         path = r.get("screenshot_path")
-        if path and os.path.exists(path):
-            filename = os.path.basename(path)
-            r['screenshot_file'] = url_for('serve_banner_image', filename=filename)
+        found_path, rel_path = find_screenshot(path)
+        
+        if found_path and rel_path:
+            r['screenshot_file'] = url_for('serve_banner_image', filename=rel_path)
         else:
             r['screenshot_file'] = None
 
@@ -526,6 +579,7 @@ def recalculate_days():
 @app.route("/banners/<path:filename>")
 @login_required
 def serve_banner_image(filename):
+    """Daily folder-тэй screenshot-уудыг дэмжинэ (жишээ: 2025-12-24/image.png)"""
     return send_from_directory("banner_screenshots", filename)
 
 @app.route("/download/xlsx")

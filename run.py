@@ -21,11 +21,6 @@ import summarize    # Report generator
 from core.common import ensure_dir
 from core.db import upsert_banner, save_run, update_daily_summary, check_connection
 
-# Logging тохиргоо
-
-
-
-
 # Замууд (Absolute paths)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SCREENSHOT_DIR = os.path.join(BASE_DIR, "banner_screenshots")
@@ -57,6 +52,7 @@ def run_pipeline() -> dict:
         msg = "❌ Database connection failed! Aborting pipeline."
         logger.error(msg)
         return {"status": "failed", "error": "no_db_connection"}
+    
     # Статистик цуглуулах хувьсагч
     stats = {
         "total_collected": 0,
@@ -88,13 +84,29 @@ def run_pipeline() -> dict:
             
             for item in items:
                 try:
-                    # Зургийн хавтасны замыг засах (Docker дотор зам зөрөхөөс сэргийлэх)
-                    # Scraper модулиуд зөв зам буцааж байгаа эсэхийг бататгах
+                    # ✅ ЗАСВАРЛАСАН: Daily folder замыг хадгалах
                     if "screenshot_path" in item and item["screenshot_path"]:
-                        # Absolute path руу хөрвүүлэх (хэрэв харьцангуй байвал)
-                        if not os.path.isabs(item["screenshot_path"]):
-                            filename = os.path.basename(item["screenshot_path"])
-                            item["screenshot_path"] = f"banner_screenshots/{filename}"
+                        orig_path = item["screenshot_path"]
+                        
+                        # Хэрэв absolute path байвал relative болгох
+                        if os.path.isabs(orig_path):
+                            # Absolute path-аас banner_screenshots/ хэсгийг олох
+                            if "banner_screenshots" in orig_path:
+                                idx = orig_path.find("banner_screenshots")
+                                item["screenshot_path"] = orig_path[idx:]
+                        else:
+                            # Relative path бол banner_screenshots/ эхэлдэг эсэхийг шалгах
+                            if not orig_path.startswith("banner_screenshots"):
+                                # Daily folder байгаа эсэхийг шалгах (YYYY-MM-DD format)
+                                parts = orig_path.replace("\\", "/").split("/")
+                                
+                                # Хэрэв эхний хэсэг нь огноо бол (2025-12-24)
+                                if len(parts) >= 2 and len(parts[0]) == 10 and parts[0][4] == '-':
+                                    # Daily folder + filename
+                                    item["screenshot_path"] = f"banner_screenshots/{orig_path}"
+                                else:
+                                    # Зөвхөн filename
+                                    item["screenshot_path"] = f"banner_screenshots/{orig_path}"
                             
                     # DB руу хадгалах
                     res = upsert_banner(item)
